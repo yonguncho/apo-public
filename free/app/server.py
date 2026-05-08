@@ -173,11 +173,11 @@ from app.services.policy_renderer import build_view_model
 from app.services.workbook_exporter import build_workbook
 from datetime import date as _date
 from app.services.severity_engine import evaluate_severity
-from app.services.ai_analyzer import analyze_policies, analyze_single_policy, check_ollama_available
+from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v23.0-2026-05-05"
+APO_VERSION = "v24-2026-05-06"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -239,6 +239,7 @@ def create_app() -> Flask:
         export_path = EXPORT_DIR / export_name
         export_path.write_text(json.dumps({"parsed": parsed, "view": view}, indent=2), encoding="utf-8")
         app.config['last_parsed'] = parsed
+        app.config['last_runtime_stats'] = {}   # 새 Config 로드 시 CSV stats 초기화
 
         return jsonify(
             {
@@ -285,7 +286,10 @@ def create_app() -> Flask:
             stats = parser.parse_text(pasted_text)
             merged.update(stats)
 
-        app.config['last_runtime_stats'] = merged
+        # 기존 stats에 병합 (FW CSV → Proxy CSV 순서로 올려도 둘 다 유지)
+        existing = app.config.get('last_runtime_stats') or {}
+        existing.update(merged)
+        app.config['last_runtime_stats'] = existing
         summary = {
             "count": len(merged),
             "matched_policy_ids": sorted(merged.keys(), key=lambda x: int(x) if x.isdigit() else x),
@@ -364,8 +368,6 @@ def create_app() -> Flask:
         def classify_list(policies):
             result = []
             for p in (policies or []):
-                if (p.get("action") or "").lower() == "deny":
-                    continue
                 sev = evaluate_severity(p, context)
                 result.append({**p, **sev})
             return result
@@ -374,31 +376,10 @@ def create_app() -> Flask:
         runtime_stats = app.config.get('last_runtime_stats', {})
         view = build_view_model(parsed, runtime_stats)
         return jsonify({
-            "firewall":  classify_list(view.get("firewall_policy", [])),
-            "proxy":     classify_list(view.get("firewall_proxy_policy", [])),
-            "multicast": classify_list(view.get("firewall_multicast_policy", [])),
+            "firewall": classify_list(view.get("firewall_policy", [])),
+            "proxy":    classify_list(view.get("firewall_proxy_policy", [])),
         })
 
-    # ── AI 분석 (Ollama/hermes3 로컬) ──────────────────────────────────────
-    @app.get("/api/ai/status")
-    def ai_status():
-        available = check_ollama_available()
-        return jsonify({"available": available, "model": "hermes3:latest"})
-
-    @app.post("/api/ai/analyze")
-    def ai_analyze():
-        payload = request.get_json(silent=True) or {}
-        policies = payload.get("policies", [])
-        mode = payload.get("mode", "summary")   # "summary" | "single"
-        model = payload.get("model", "hermes3:latest")
-        try:
-            if mode == "single" and policies:
-                result = analyze_single_policy(policies[0], model)
-            else:
-                result = analyze_policies(policies, model)
-            return jsonify({"result": result, "model": model})
-        except RuntimeError as e:
-            return jsonify({"error": str(e)}), 503
 
     @app.post("/api/export/severity-workbook")
     def export_severity_workbook():
@@ -412,135 +393,24 @@ def create_app() -> Flask:
             headers={"Content-Disposition": "attachment; filename=severity_export.xlsx"}
         )
 
+    # ── License ────────────────────────────────────────────────────────────
+    @app.get("/api/license/status")
+    def license_status():
+        info = get_license_info()
+        if info:
+            return jsonify({"licensed": True, "email": info.get("email"), "issued": info.get("issued")})
+        return jsonify({"licensed": False})
+
+    @app.post("/api/license/activate")
+    def license_activate():
+        payload = request.get_json(silent=True) or {}
+        key = str(payload.get("key", "")).strip()
+        if not key:
+            return jsonify({"error": "key is required"}), 400
+        try:
+            data = activate(key)
+            return jsonify({"ok": True, "email": data.get("email"), "issued": data.get("issued")})
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
     return app
-
-
-# ── AI 기능 (Electron 앱 전용) ─────────────────────────────────
-
-import requests as _ai_req
-
-
-def _call_ollama(prompt: str, model: str = 'llama3.2:3b') -> str:
-    """Ollama API 공통 호출"""
-    try:
-        r = _ai_req.post(
-            'http://localhost:11434/api/generate',
-            json={'model': model, 'prompt': prompt, 'stream': False},
-            timeout=60
-        )
-        return r.json().get('response', 'No response from AI.')
-    except Exception as e:
-        return f'AI unavailable: {str(e)}'
-
-
-def _register_ai_routes(app):
-    from flask import request, jsonify
-
-    @app.route('/api/ai/explain', methods=['POST'])
-    def ai_explain_policy():
-        """단일 정책 위험도 설명 및 CLI 제안"""
-        data = request.get_json()
-        p = data.get('policy_data', {})
-        prompt = f"""You are a FortiGate firewall security expert.
-Analyze this firewall policy and provide a concise technical assessment.
-
-Policy Name : {p.get('name', 'Unknown')}
-Action      : {p.get('action', 'Unknown')}
-Source      : {p.get('srcaddr', 'Unknown')}
-Destination : {p.get('dstaddr', 'Unknown')}
-Service     : {p.get('service', 'Unknown')}
-Status      : {p.get('status', 'Unknown')}
-Hit Count   : {p.get('hit_count', 'Unknown')}
-Severity    : {p.get('severity', 'Unknown')}
-
-Provide exactly 3 sections:
-1. Risk: (2 sentences, technical)
-2. Recommendation: Keep / Modify / Delete
-3. CLI: exact FortiGate command
-
-Audience: network security engineer. Be concise."""
-        return jsonify({'explanation': _call_ollama(prompt)})
-
-    @app.route('/api/ai/cli', methods=['POST'])
-    def ai_generate_cli():
-        """선택 정책 일괄 CLI 명령어 생성"""
-        data = request.get_json()
-        policies = data.get('policies', [])
-        lines = '\n'.join([
-            f"  ID:{p.get('policyid','?')}  "
-            f"Name:{p.get('name','?')}  "
-            f"Action:{p.get('action','?')}  "
-            f"Status:{p.get('status','?')}  "
-            f"HitCount:{p.get('hit_count','?')}"
-            for p in policies
-        ])
-        prompt = f"""You are a FortiGate CLI expert.
-Generate exact FortiGate CLI commands for these policies.
-Use 'delete' for disabled/expired/zero-hit policies.
-Use 'set status disable' for risky but active policies.
-
-Policies:
-{lines}
-
-Output ONLY CLI commands. No explanation. No markdown fences.
-
-Format:
-config firewall policy
-    delete <id>
-    edit <id>
-        set status disable
-    next
-end"""
-        return jsonify({'cli_commands': _call_ollama(prompt)})
-
-    @app.route('/api/ai/report', methods=['POST'])
-    def ai_generate_report():
-        """경영진용 감사 보고서 HTML 생성"""
-        import datetime
-        data = request.get_json()
-        summary = data.get('severity_summary', {})
-        total = sum(summary.values()) if summary else 0
-        prompt = f"""You are a cybersecurity consultant.
-Write a professional executive summary for a FortiGate firewall policy audit.
-
-Total Policies Analyzed : {total}
-Severity Breakdown      : {summary}
-
-Structure:
-1. Executive Summary (3 sentences)
-2. Key Findings (top 3 risks, bullet points)
-3. Immediate Actions Required
-4. Cleanup Effort Estimate (Low / Medium / High + reason)
-
-Professional tone. Suitable for CISO or IT Manager. Under 300 words."""
-        text = _call_ollama(prompt)
-        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
-        report_html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<title>APO Tool — Audit Report</title>
-<style>
-  body {{font-family:sans-serif;max-width:820px;
-         margin:48px auto;padding:0 24px;color:#1a1a2e;}}
-  h1   {{border-bottom:3px solid #EE2228;padding-bottom:12px;}}
-  .body{{line-height:1.85;white-space:pre-wrap;font-size:15px;}}
-  .foot{{color:#999;font-size:12px;margin-top:36px;
-         border-top:1px solid #eee;padding-top:12px;}}
-</style></head><body>
-<h1>FortiGate Policy Audit — Executive Summary</h1>
-<div class="body">{text}</div>
-<div class="foot">Generated by APO Tool AI · {now}</div>
-</body></html>"""
-        return jsonify({'report_html': report_html})
-
-    @app.route('/health')
-    def health():
-        return jsonify({'status': 'ok'}), 200
-
-
-# create_app() 래핑 — AI 라우트 자동 등록
-_original_create_app = create_app
-
-def create_app():
-    _app = _original_create_app()
-    _register_ai_routes(_app)
-    return _app

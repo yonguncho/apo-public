@@ -737,3 +737,34 @@ tbody tr:hover {
 .ai-text{color:var(--text);font-size:13px;line-height:1.85;white-space:pre-wrap}
 .ai-thinking{color:var(--muted);font-size:13px;font-style:italic}
 .ai-error{color:var(--danger-text);font-size:13px}
+
+/* APO v24 upload 3-col */
+.upload-3col{grid-template-columns:repeat(3,minmax(240px,1fr))}
+@media(max-width:1080px){.upload-3col{grid-template-columns:repeat(2,minmax(240px,1fr))}}
+@media(max-width:720px){.upload-3col{grid-template-columns:1fr}}
+
+/* APO v24 disabled button */
+button:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(60%)}
+button:disabled:hover{transform:none;box-shadow:none}
+
+/* APO v24 severity guide note */
+.sev-guide-note{margin-top:10px;padding:10px 14px;background:#f8fbff;border-left:3px solid var(--accent);border-radius:0 10px 10px 0;font-size:12px;color:var(--muted);line-height:1.6}
+
+/* APO License Modal */
+.lic-overlay{position:fixed;inset:0;z-index:9999;background:rgba(10,18,30,.55);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center}
+.lic-modal{position:relative;width:min(480px,94vw);background:#fff;border-radius:24px;box-shadow:0 32px 80px rgba(10,21,36,.22);padding:32px 28px 28px}
+.lic-header{margin-bottom:20px}
+.lic-section{margin-bottom:18px}
+.lic-label{font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
+.lic-row{display:flex;gap:10px}
+.lic-input{flex:1;padding:11px 14px;border:1px solid var(--line-strong);border-radius:12px;background:#fff;color:var(--text);outline:none;font-size:13px}
+.lic-input:focus{border-color:rgba(214,43,32,.42);box-shadow:0 0 0 4px rgba(214,43,32,.10)}
+.lic-divider{text-align:center;color:var(--muted);font-size:12px;font-weight:700;margin:4px 0 18px;position:relative}
+.lic-divider::before,.lic-divider::after{content:'';position:absolute;top:50%;width:42%;height:1px;background:var(--line)}
+.lic-divider::before{left:0}.lic-divider::after{right:0}
+.lic-note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6}
+.lic-msg{font-size:12px;margin-top:8px;min-height:18px}
+.lic-msg.error{color:var(--danger-text)}
+.lic-msg.success{color:var(--success-text);font-weight:700}
+.lic-close{position:absolute;top:14px;right:16px;appearance:none;border:0;background:transparent;font-size:18px;color:var(--muted);cursor:pointer;line-height:1}
+.lic-close:hover{color:var(--text-strong)}

@@ -123,19 +123,16 @@ SEVERITY_COLS = [
 
 
 def build_severity_workbook(result: dict) -> bytes:
-    """result: {"firewall": [...], "proxy": [...], "multicast": [...]} -> xlsx bytes"""
+    """result: {"firewall": [...], "proxy": [...]} -> xlsx bytes"""
     wb = Workbook()
     wb.remove(wb.active)
 
-    all_policies = (result.get("firewall", [])
-                  + result.get("proxy", [])
-                  + result.get("multicast", []))
+    all_policies = result.get("firewall", []) + result.get("proxy", [])
 
     sheet_map = [
-        ("Severity_All",     all_policies),
-        ("Firewall_Policy",  result.get("firewall", [])),
-        ("Proxy_Policy",     result.get("proxy", [])),
-        ("Multicast_Policy", result.get("multicast", [])),
+        ("Severity_All",    all_policies),
+        ("Firewall_Policy", result.get("firewall", [])),
+        ("Proxy_Policy",    result.get("proxy", [])),
     ]
 
     for sheet_name, policies in sheet_map:

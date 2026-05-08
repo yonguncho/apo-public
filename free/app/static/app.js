@@ -4,14 +4,22 @@ let currentRuntimeStats = {};
 let activeTab = 'firewall_policy';
 
 const configFileInput = document.getElementById('configFile');
-const policyStatsFilesInput = document.getElementById('policyStatsFiles');
 const configPickerBtn = document.getElementById('configPickerBtn');
-const policyCsvPickerBtn = document.getElementById('policyCsvPickerBtn');
 const selectedConfigName = document.getElementById('selectedConfigName');
-const selectedPolicyCsvName = document.getElementById('selectedPolicyCsvName');
 const configStatus = document.getElementById('configStatus');
 const policyStatsStatus = document.getElementById('policyStatsStatus');
 const policyCsvSummary = document.getElementById('policyCsvSummary');
+
+const fwCsvPickerBtn = document.getElementById('fwCsvPickerBtn');
+const fwPolicyCsvFile = document.getElementById('fwPolicyCsvFile');
+const selectedFwCsvName = document.getElementById('selectedFwCsvName');
+
+const proxyCsvPickerBtn = document.getElementById('proxyCsvPickerBtn');
+const proxyPolicyCsvFile = document.getElementById('proxyPolicyCsvFile');
+const selectedProxyCsvName = document.getElementById('selectedProxyCsvName');
+
+let fwCsvSummary = null;
+let proxyCsvSummary = null;
 const tabContent = document.getElementById('tabContent');
 const downloadBox = document.getElementById('downloadBox');
 const metaBox = document.getElementById('metaBox');
@@ -67,7 +75,7 @@ const TAB_DEFS = {
       ['Service', i => joinList(i.service_display)],
       ['Schedule', i => i.schedule || ''],
       ['Action', i => i.action || ''],
-      ['Hit Count', i => i.hit_count ?? 0],
+      ['Hit Count', i => i.hit_count ?? '-'],
       ['Last Used', i => i.last_used || '-'],
       ['No ITS Request Reason', i => noItsReason(i)],
     ],
@@ -90,7 +98,7 @@ const TAB_DEFS = {
       ['Service', i => joinList(i.service_display)],
       ['Schedule', i => i.schedule || ''],
       ['Action', i => i.action || ''],
-      ['Hit Count', i => i.hit_count ?? 0],
+      ['Hit Count', i => i.hit_count ?? '-'],
       ['Last Used', i => i.last_used || '-'],
       ['No ITS Request Reason', i => noItsReason(i)],
     ],
@@ -221,7 +229,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 configPickerBtn.addEventListener('click', () => configFileInput.click());
-policyCsvPickerBtn.addEventListener('click', () => policyStatsFilesInput.click());
+fwCsvPickerBtn.addEventListener('click', () => fwPolicyCsvFile.click());
+proxyCsvPickerBtn.addEventListener('click', () => proxyPolicyCsvFile.click());
 
 configFileInput.addEventListener('change', async () => {
   const file = configFileInput.files?.[0];
@@ -243,51 +252,89 @@ configFileInput.addEventListener('change', async () => {
   currentParsed = data.parsed;
   currentView = data.view;
   currentRuntimeStats = {};
+  fwCsvSummary = null;
+  proxyCsvSummary = null;
+  if (selectedFwCsvName) selectedFwCsvName.textContent = 'No file selected';
+  if (selectedProxyCsvName) selectedProxyCsvName.textContent = 'No file selected';
   resetPolicyFilters();
   configStatus.textContent = `Loaded ${data.filename}`;
-  policyStatsStatus.textContent = 'Import GUI policy CSV to merge Last Used, Hit Count, and Status.';
-  policyCsvSummary.innerHTML = '';
+  policyStatsStatus.textContent = 'Firewall Policy CSV 또는 Proxy Policy CSV를 업로드하세요.';
+  renderPolicyCsvSummary();
   downloadBox.innerHTML = `<a href="/exports/${data.export_json}">Download parsed JSON</a>`;
   renderMeta(data.view?.meta || {});
   updatePolicyFilterVisibility();
   renderActiveTab();
 });
 
-policyStatsFilesInput.addEventListener('change', async () => {
-  const file = policyStatsFilesInput.files?.[0];
-  selectedPolicyCsvName.textContent = file ? file.name : 'No file selected';
+async function importPolicyCsv(file, type) {
   if (!file) return;
-
   const formData = new FormData();
   formData.append('policy_stats_files', file);
-
-  policyStatsStatus.textContent = 'Importing policy CSV stats...';
+  policyStatsStatus.textContent = `Importing ${type} CSV...`;
 
   const res = await fetch('/api/policy-stats/import', { method: 'POST', body: formData });
   const data = await res.json();
 
   if (!res.ok) {
-    policyStatsStatus.textContent = data.error || 'Failed to import policy CSV stats';
+    policyStatsStatus.textContent = data.error || `Failed to import ${type} CSV`;
     return;
   }
 
   currentRuntimeStats = { ...currentRuntimeStats, ...(data.runtime_stats || {}) };
-  renderPolicyCsvSummary(data.summary || {}, file.name);
-  policyStatsStatus.textContent = `Merged GUI policy CSV from ${file.name}`;
+
+  if (type === 'FW') {
+    fwCsvSummary = { summary: data.summary, filename: file.name };
+  } else {
+    proxyCsvSummary = { summary: data.summary, filename: file.name };
+  }
+
+  renderPolicyCsvSummary();
+  policyStatsStatus.textContent = `${type} Policy CSV 반영 완료: ${file.name}`;
   await rerenderWithRuntimeStats();
+
+  // severity 결과가 있으면 자동 재분류
+  if (typeof sevData !== 'undefined' && sevData) {
+    const runBtn = document.getElementById('sevClassifyBtn');
+    if (runBtn) runBtn.click();
+  }
+}
+
+fwPolicyCsvFile.addEventListener('change', async () => {
+  const file = fwPolicyCsvFile.files?.[0];
+  if (selectedFwCsvName) selectedFwCsvName.textContent = file ? file.name : 'No file selected';
+  await importPolicyCsv(file, 'FW');
+});
+
+proxyPolicyCsvFile.addEventListener('change', async () => {
+  const file = proxyPolicyCsvFile.files?.[0];
+  if (selectedProxyCsvName) selectedProxyCsvName.textContent = file ? file.name : 'No file selected';
+  await importPolicyCsv(file, 'Proxy');
 });
 
 async function rerenderWithRuntimeStats() {
   if (!currentParsed) return;
-  const renderRes = await fetch('/api/policies/render', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ parsed: currentParsed, runtime_stats: currentRuntimeStats })
-  });
-  const renderData = await renderRes.json();
-  currentView = renderData.view;
-  renderMeta(renderData.view?.meta || {});
-  renderActiveTab();
+  try {
+    const renderRes = await fetch('/api/policies/render', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parsed: currentParsed, runtime_stats: currentRuntimeStats })
+    });
+    if (!renderRes.ok) {
+      const err = await renderRes.json().catch(() => ({}));
+      if (policyStatsStatus) policyStatsStatus.textContent = `CSV 반영 오류: ${err.error || renderRes.status}`;
+      return;
+    }
+    const renderData = await renderRes.json();
+    if (!renderData.view) {
+      if (policyStatsStatus) policyStatsStatus.textContent = 'CSV 반영 오류: 응답 데이터 없음';
+      return;
+    }
+    currentView = renderData.view;
+    renderMeta(renderData.view?.meta || {});
+    renderActiveTab();
+  } catch (e) {
+    if (policyStatsStatus) policyStatsStatus.textContent = `CSV 반영 실패: ${e.message}`;
+  }
 }
 
 function resetPolicyFilters() {
@@ -321,19 +368,30 @@ function renderMeta(meta) {
   `).join('');
 }
 
-function renderPolicyCsvSummary(summary, filename) {
-  const items = [
-    ['File', filename || '-'],
-    ['Rows Loaded', summary.count ?? 0],
-    ['First Policy ID', summary.matched_policy_ids?.[0] || '-'],
-    ['Last Policy ID', summary.matched_policy_ids?.slice(-1)[0] || '-'],
-  ];
-  policyCsvSummary.innerHTML = items.map(([label, value]) => `
-    <div class="stat-card compact">
-      <span class="stat-label">${escapeHtml(label)}</span>
-      <strong class="stat-value">${escapeHtml(String(value))}</strong>
-    </div>
-  `).join('');
+function renderPolicyCsvSummary() {
+  const makeCards = (label, info) => {
+    if (!info) {
+      return `<div class="stat-card compact">
+        <span class="stat-label">${escapeHtml(label)}</span>
+        <strong class="stat-value" style="font-size:13px;color:var(--muted)">미로드</strong>
+      </div>`;
+    }
+    const { summary, filename } = info;
+    return `
+      <div class="stat-card compact">
+        <span class="stat-label">${escapeHtml(label)}</span>
+        <strong class="stat-value" style="font-size:13px">${escapeHtml(filename)}</strong>
+      </div>
+      <div class="stat-card compact">
+        <span class="stat-label">${escapeHtml(label)} Rows</span>
+        <strong class="stat-value">${escapeHtml(String(summary.count ?? 0))}</strong>
+      </div>`;
+  };
+  if (policyCsvSummary) {
+    policyCsvSummary.innerHTML =
+      makeCards('FW Policy CSV', fwCsvSummary) +
+      makeCards('Proxy Policy CSV', proxyCsvSummary);
+  }
 }
 
 function renderActiveTab() {
@@ -459,7 +517,7 @@ function renderPolicyTable(items) {
       <td>${renderList(item.service_display)}</td>
       <td>${escapeHtml(item.schedule || '')}</td>
       <td>${escapeHtml(item.action || '')}</td>
-      <td>${escapeHtml(String(item.hit_count ?? 0))}</td>
+      <td>${item.hit_count != null ? escapeHtml(String(item.hit_count)) : '<span class="muted">-</span>'}</td>
       <td>${escapeHtml(item.last_used || '-')}</td>
       <td>${escapeHtml(noItsReason(item))}</td>
     </tr>
@@ -657,6 +715,8 @@ downloadCsvBtn.addEventListener('click', () => {
 
 downloadWorkbookBtn.addEventListener('click', async () => {
   if (!currentView) return;
+  if (!(await licenseGate())) return;   // 라이선스 확인
+
   const payload = { workbook_name: 'firewall_policy_optimizer_export', sheets: {} };
   for (const tabName of ALL_TABS) {
     const tab = TAB_DEFS[tabName];
@@ -673,10 +733,7 @@ downloadWorkbookBtn.addEventListener('click', async () => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) {
-    alert('Failed to build workbook export.');
-    return;
-  }
+  if (!res.ok) { alert('Failed to build workbook export.'); return; }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -695,6 +752,79 @@ function csvEscape(value) {
 }
 
 renderActiveTab();
+
+
+/* APO License Gate & Modal */
+const LEMON_CHECKOUT_URL = 'https://apo-tool.lemonsqueezy.com/buy/apo-export';
+
+let _licensed = null;  // null=미확인, true/false
+
+async function checkLicense() {
+  try {
+    const r = await fetch('/api/license/status');
+    const d = await r.json();
+    _licensed = d.licensed === true;
+  } catch (_) {
+    _licensed = false;
+  }
+  return _licensed;
+}
+
+async function licenseGate() {
+  if (_licensed === null) await checkLicense();
+  if (_licensed) return true;
+  showLicenseModal();
+  return false;
+}
+
+function showLicenseModal() {
+  document.getElementById('licenseModal')?.classList.remove('hidden');
+  document.getElementById('licKeyInput')?.focus();
+}
+function hideLicenseModal() {
+  document.getElementById('licenseModal')?.classList.add('hidden');
+  document.getElementById('licActivateMsg').textContent = '';
+  document.getElementById('licKeyInput').value = '';
+}
+
+document.getElementById('licCloseBtn')?.addEventListener('click', hideLicenseModal);
+document.getElementById('licenseModal')?.addEventListener('click', e => {
+  if (e.target.id === 'licenseModal') hideLicenseModal();
+});
+
+document.getElementById('licActivateBtn')?.addEventListener('click', async () => {
+  const key = document.getElementById('licKeyInput')?.value.trim();
+  const msg = document.getElementById('licActivateMsg');
+  if (!key) { msg.textContent = '라이선스 키를 입력해주세요.'; msg.className = 'lic-msg error'; return; }
+  msg.textContent = '검증 중...'; msg.className = 'lic-msg';
+  try {
+    const r = await fetch('/api/license/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '활성화 실패');
+    _licensed = true;
+    msg.textContent = `활성화 완료 (${d.email})`;
+    msg.className = 'lic-msg success';
+    setTimeout(() => { hideLicenseModal(); downloadWorkbookBtn?.click(); }, 1000);
+  } catch (e) {
+    msg.textContent = e.message;
+    msg.className = 'lic-msg error';
+  }
+});
+
+document.getElementById('licBuyBtn')?.addEventListener('click', () => {
+  const email = document.getElementById('licEmailInput')?.value.trim();
+  const url = email
+    ? `${LEMON_CHECKOUT_URL}?checkout[email]=${encodeURIComponent(email)}`
+    : LEMON_CHECKOUT_URL;
+  window.open(url, '_blank');
+});
+
+// 앱 시작 시 라이선스 상태 미리 확인
+checkLicense();
 
 
 /* APO v20 strict two-page UI and configuration review */
@@ -773,8 +903,6 @@ renderActiveTab();
   const classifyBtn  = document.getElementById("sevClassifyBtn");
   const rangeTags    = document.getElementById("sevRangeTags");
   const statusEl     = document.getElementById("sevClassifyStatus");
-  const phase1Card   = document.getElementById("sevPhase1Card");
-  const phase1Bar    = document.getElementById("sevPhase1Bar");
   const phase2Card   = document.getElementById("sevPhase2Card");
   const summaryBar   = document.getElementById("sevSummaryBar");
   const tableCard    = document.getElementById("sevTableCard");
@@ -798,22 +926,9 @@ renderActiveTab();
     });
   }
 
-  function renderPhase1(data) {
-    if (!phase1Card || !phase1Bar) return;
-    const all = [...(data.firewall||[]),...(data.proxy||[]),...(data.multicast||[])];
-    const tc = {};
-    all.forEach(p => (p.tags||[]).forEach(t => { tc[t]=(tc[t]||0)+1; }));
-    if (!Object.keys(tc).length) { phase1Card.style.display='none'; return; }
-    phase1Card.style.display='';
-    phase1Bar.innerHTML = Object.entries(tc).map(([tag,cnt]) => {
-      const cls = TAG_COLORS[tag]||'tag-default';
-      return `<span class="phase1-chip tag-badge ${cls}">${escapeHtml(tag)}: <strong>${cnt}</strong></span>`;
-    }).join('');
-  }
-
   function renderSummaryBar(data) {
     if (!phase2Card || !summaryBar) return;
-    const all = [...(data.firewall||[]),...(data.proxy||[]),...(data.multicast||[])];
+    const all = [...(data.firewall||[]),...(data.proxy||[])];
     const counts = {};
     all.forEach(p => { const u=p.urgency??0; counts[u]=(counts[u]||0)+1; });
     if (!Object.keys(counts).length) { phase2Card.style.display='none'; return; }
@@ -859,7 +974,8 @@ renderActiveTab();
         <td><div class="badge-list">${mkBadges(p.service_display)}</div></td>
         <td>${escapeHtml(p.action||'')}</td>
         <td>${escapeHtml(p.status||'')}</td>
-        <td>${escapeHtml(String(p.hit_count??0))}</td>
+        <td>${escapeHtml(String(p.hit_count??'-'))}</td>
+        <td>${escapeHtml(p.last_used||'-')}</td>
         <td>${escapeHtml(p.traffic_type||'')}</td>
         <td style="font-size:11px;max-width:200px">${escapeHtml(p.reason||'')}</td>
         <td style="font-size:11px;max-width:140px">${escapeHtml(p.recommended_action||'')}</td>
@@ -868,7 +984,7 @@ renderActiveTab();
     tableContent.innerHTML=`<table class="result-table"><thead><tr>
       <th>Sev</th><th>위험도</th><th>Tags</th><th>Policy ID</th><th>Name</th>
       <th>RITM</th><th>Request Date</th><th>Source</th><th>Destination</th>
-      <th>Service</th><th>Action</th><th>Status</th><th>Hit Count</th>
+      <th>Service</th><th>Action</th><th>Status</th><th>Hit Count</th><th>Last Used</th>
       <th>Traffic Type</th><th>Reason</th><th>Recommended Action</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
   }
@@ -884,12 +1000,42 @@ renderActiveTab();
       const data = await res.json();
       if (!res.ok) throw new Error(data.error||'Classification failed');
       sevData=data;
-      renderPhase1(data); renderSummaryBar(data); renderTable();
-      const total=(data.firewall||[]).length+(data.proxy||[]).length+(data.multicast||[]).length;
+      renderSummaryBar(data); renderTable();
+      const total=(data.firewall||[]).length+(data.proxy||[]).length;
       if (statusEl) statusEl.textContent=`${total}개 정책 분류 완료.`;
     } catch(err) {
       if (statusEl) statusEl.textContent=err.message||'Failed';
     }
+  }
+
+  // 파일 가져오기 (txt 한 줄에 CIDR 하나)
+  const importBtn  = document.getElementById('sevRangeImportBtn');
+  const importFile = document.getElementById('sevRangeImportFile');
+  if (importBtn) importBtn.addEventListener('click', () => importFile?.click());
+  if (importFile) {
+    importFile.addEventListener('change', () => {
+      const file = importFile.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const lines = (e.target.result || '').split(/\r?\n/);
+        let added = 0;
+        for (const raw of lines) {
+          // "10.99.240.0./21" 같은 오탈자 처리: 슬래시 직전 점 제거
+          const cidr = raw.trim().replace(/\.+\//g, '/');
+          if (!cidr || !cidr.includes('/')) continue;
+          userRanges.push({ cidr });
+          added++;
+        }
+        renderRangeTags();
+        if (added > 0) {
+          await syncToServer();
+          if (statusEl) statusEl.textContent = `${added}개 IP 대역 가져오기 완료.`;
+        }
+        importFile.value = '';
+      };
+      reader.readAsText(file, 'UTF-8');
+    });
   }
 
   if (rangeAddBtn) rangeAddBtn.addEventListener('click',()=>{
@@ -909,6 +1055,7 @@ renderActiveTab();
 
   if (exportBtn) exportBtn.addEventListener('click',async()=>{
     if (!sevData) return;
+    if (!(await licenseGate())) return;   // 라이선스 확인
     const res=await fetch('/api/export/severity-workbook',{
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify(sevData),
@@ -921,171 +1068,6 @@ renderActiveTab();
     URL.revokeObjectURL(url);
   });
 
-  // AI 분석 (Ollama hermes3)
-  const aiBtn = document.getElementById('aiAnalyzeBtn');
-  const aiResult = document.getElementById('aiAnalysisResult');
-
-  if (aiBtn) {
-    aiBtn.addEventListener('click', async () => {
-      if (!sevData) return;
-      const allPolicies = [...(sevData.firewall||[]), ...(sevData.proxy||[]), ...(sevData.multicast||[])];
-      if (!allPolicies.length) return;
-
-      aiBtn.disabled = true;
-      aiBtn.textContent = 'AI 분석 중...';
-      if (aiResult) { aiResult.style.display = 'block'; aiResult.innerHTML = '<div class="ai-thinking">hermes3 분석 중... (30초~2분 소요)</div>'; }
-
-      try {
-        const res = await fetch('/api/ai/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ policies: allPolicies, mode: 'summary', model: 'hermes3:latest' }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'AI 분석 실패');
-        if (aiResult) {
-          aiResult.innerHTML = `<div class="ai-model-tag">hermes3:latest</div><div class="ai-text">${escapeHtml(data.result).replace(/\n/g, '<br>')}</div>`;
-        }
-      } catch (err) {
-        if (aiResult) aiResult.innerHTML = `<div class="ai-error">${escapeHtml(err.message)}</div>`;
-      } finally {
-        aiBtn.disabled = false;
-        aiBtn.textContent = 'AI 분석 (hermes3)';
-      }
-    });
-  }
-
   renderRangeTags();
 })();
 
-
-// ── AI 기능 (Electron 앱 전용) ─────────────────────
-
-async function aiExplainPolicy(policyId, policyData) {
-  const btn = document.getElementById('ai-btn-' + policyId)
-  if (btn) { btn.textContent = '...'; btn.disabled = true }
-  try {
-    const res = await fetch('/api/ai/explain', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ policy_data: policyData })
-    })
-    const data = await res.json()
-    _renderAIRow(policyId, data.explanation)
-  } catch (e) {
-    alert('AI unavailable. Make sure Ollama is running.')
-  } finally {
-    if (btn) { btn.textContent = '✦ AI'; btn.disabled = false }
-  }
-}
-
-async function aiGenerateCLI(policies) {
-  if (!policies || policies.length === 0) {
-    alert('No policies selected.')
-    return
-  }
-  const res = await fetch('/api/ai/cli', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ policies })
-  })
-  const data = await res.json()
-  _renderCLIModal(data.cli_commands)
-}
-
-async function aiGenerateReport() {
-  const btn = document.getElementById('ai-report-btn')
-  if (btn) { btn.textContent = 'Generating...'; btn.disabled = true }
-  try {
-    const summary = _collectSeveritySummary()
-    const res = await fetch('/api/ai/report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ severity_summary: summary })
-    })
-    const data = await res.json()
-    const blob = new Blob([data.report_html], { type: 'text/html' })
-    window.open(URL.createObjectURL(blob), '_blank')
-  } catch (e) {
-    alert('Report generation failed: ' + e.message)
-  } finally {
-    if (btn) { btn.textContent = '✦ AI Audit Report'; btn.disabled = false }
-  }
-}
-
-function _collectSeveritySummary() {
-  const summary = {}
-  document.querySelectorAll('[data-severity]').forEach(el => {
-    const s = el.dataset.severity
-    summary[s] = (summary[s] || 0) + 1
-  })
-  return summary
-}
-
-function _renderAIRow(policyId, text) {
-  const rowId = 'ai-row-' + policyId
-  let row = document.getElementById(rowId)
-  if (!row) {
-    row = document.createElement('tr')
-    row.id = rowId
-    const src = document.getElementById('row-' + policyId)
-      || document.querySelector(`[data-id="${policyId}"]`)
-    if (src) src.insertAdjacentElement('afterend', row)
-    else document.querySelector('tbody')?.appendChild(row)
-  }
-  row.innerHTML = `
-    <td colspan="99"
-      style="background:#0d0d1a;color:#ccc;padding:12px 20px;
-             font-size:13px;border-left:3px solid #EE2228;">
-      <strong style="color:#EE2228;">✦ AI Analysis</strong>
-      <pre style="margin:8px 0 0;white-space:pre-wrap;
-                  font-family:inherit;line-height:1.6;">${text}</pre>
-      <button onclick="this.closest('tr').remove()"
-        style="margin-top:8px;background:transparent;
-               border:1px solid #444;color:#666;
-               padding:4px 12px;border-radius:4px;
-               cursor:pointer;font-size:11px;">Close</button>
-    </td>`
-}
-
-function _renderCLIModal(commands) {
-  document.getElementById('cli-modal')?.remove()
-  const m = document.createElement('div')
-  m.id = 'cli-modal'
-  m.style.cssText = `
-    position:fixed;inset:0;background:rgba(0,0,0,0.85);
-    z-index:9999;display:flex;
-    align-items:center;justify-content:center;`
-  m.innerHTML = `
-    <div style="background:#1a1a2e;border:1px solid #EE2228;
-                border-radius:12px;padding:24px;
-                max-width:640px;width:90%;
-                max-height:80vh;overflow-y:auto;">
-      <h3 style="color:#EE2228;margin:0 0 16px;font-size:16px;">
-        ✦ FortiGate CLI Commands
-      </h3>
-      <pre id="cli-code"
-        style="background:#0d0d1a;color:#0f0;padding:16px;
-               border-radius:8px;overflow-x:auto;
-               font-size:13px;line-height:1.6;margin:0 0 16px;"
-      >${commands}</pre>
-      <div style="display:flex;gap:12px;">
-        <button onclick="
-          navigator.clipboard.writeText(
-            document.getElementById('cli-code').textContent
-          ).then(()=>this.textContent='Copied ✓')"
-          style="background:#EE2228;color:#fff;border:none;
-                 padding:10px 20px;border-radius:6px;
-                 cursor:pointer;font-weight:bold;">
-          Copy to Clipboard
-        </button>
-        <button onclick="document.getElementById('cli-modal').remove()"
-          style="background:transparent;border:1px solid #555;
-                 color:#ccc;padding:10px 20px;
-                 border-radius:6px;cursor:pointer;">
-          Close
-        </button>
-      </div>
-    </div>`
-  document.body.appendChild(m)
-}

@@ -8,11 +8,14 @@ from typing import Any
 
 class PolicyStatsCsvParser:
     COLUMN_ALIASES = {
-        "policy_id": {"id", "policy id", "policyid"},
-        "hit_count": {"hit count", "hitcount"},
-        "last_used": {"last used", "lastused"},
-        "status": {"status"},
-        "name": {"policy", "name", "policy name"},
+        "policy_id": {"id", "policy id", "policyid", "#", "no", "no.", "seq", "seq#",
+                      "sequence", "policy_id", "rule id", "rule_id"},
+        "hit_count": {"hit count", "hitcount", "hits", "hit", "count",
+                      "packets", "pkts", "traffic count"},
+        "last_used": {"last used", "lastused", "last hit", "lasthit",
+                      "last access", "last_used", "last_hit"},
+        "status":    {"status", "enabled", "state"},
+        "name":      {"policy", "name", "policy name", "rule name", "rulename"},
     }
 
     def parse_text(self, text: str) -> dict[str, dict[str, Any]]:

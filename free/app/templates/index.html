@@ -35,7 +35,7 @@
         <p>Upload the current FortiGate configuration and GUI policy CSV to review policy status, usage data, objects, services, and optimization candidates.</p>
       </div>
 
-      <div class="quick-upload analysis-upload">
+      <div class="quick-upload analysis-upload upload-3col">
         <div class="quick-upload-card">
           <div>
             <strong>Config File</strong>
@@ -46,11 +46,19 @@
         </div>
         <div class="quick-upload-card">
           <div>
-            <strong>Policy CSV</strong>
-            <span id="selectedPolicyCsvName" class="file-name">No file selected</span>
+            <strong>Firewall Policy CSV</strong>
+            <span id="selectedFwCsvName" class="file-name">No file selected</span>
           </div>
-          <button type="button" id="policyCsvPickerBtn" class="secondary-btn">Policy CSV</button>
-          <input type="file" id="policyStatsFiles" name="policy_stats_files" accept=".csv,.txt" hidden />
+          <button type="button" id="fwCsvPickerBtn" class="secondary-btn">FW Policy CSV</button>
+          <input type="file" id="fwPolicyCsvFile" accept=".csv,.txt" hidden />
+        </div>
+        <div class="quick-upload-card">
+          <div>
+            <strong>Proxy Policy CSV</strong>
+            <span id="selectedProxyCsvName" class="file-name">No file selected</span>
+          </div>
+          <button type="button" id="proxyCsvPickerBtn" class="secondary-btn">Proxy Policy CSV</button>
+          <input type="file" id="proxyPolicyCsvFile" accept=".csv,.txt" hidden />
         </div>
       </div>
 
@@ -167,7 +175,7 @@
       <div class="page-intro-card">
         <span class="section-index">Severity Classification</span>
         <h2>Policy Risk Assessment</h2>
-        <p>NIST SP 800-41 기반 긴급도 분류. Config 파일 로드 후 즉시 태그 분석(Phase 1), User IP 대역 입력 시 완전 분류(Phase 2).</p>
+        <p>NIST SP 800-41 기반 긴급도 분류. User IP 대역 설정 후 분류 적용 시 Severity 1~7 전체 판단. Severity 1/2/7은 IP 대역 없이도 판단 가능.</p>
       </div>
 
       <article class="glass-card" style="margin-bottom:20px;padding:20px">
@@ -180,16 +188,58 @@
               <tr><th>Severity</th><th>위험도</th><th>조치</th><th>판단 조건</th><th>비고</th></tr>
             </thead>
             <tbody>
-              <tr class="sev-1"><td><span class="sev-badge s1">1</span></td><td>Critical</td><td>즉시 비활성화</td><td>Any/All 정책 / FTP·TELNET / Temp+NoRITM / BOSK 객체</td><td>비활성화 후 Hit=0 되면 삭제</td></tr>
-              <tr class="sev-2"><td><span class="sev-badge s2">2</span></td><td>High</td><td>삭제</td><td>Disabled / 만료 Schedule / Hit=0+Accept+기간초과</td><td>S-S: always→1yr초과 / 날짜지정→2yr초과</td></tr>
-              <tr class="sev-3"><td><span class="sev-badge s3">3</span></td><td>Medium</td><td>DT 검증 후 결정</td><td>Server-User, 1yr 초과, Hit &lt; 경과연도×100</td><td>등록연도 미상 → 2021년 기준</td></tr>
-              <tr class="sev-4"><td><span class="sev-badge s4">4</span></td><td>Medium</td><td>DT 검증 후 결정</td><td>Server-Server, 2yr 초과, Hit &lt; 50 / 등록일 미상</td><td>S-S Schedule 날짜 기준 2yr 초과도 해당</td></tr>
-              <tr class="sev-5"><td><span class="sev-badge s5">5</span></td><td>Low</td><td>ITS Ticket 요청</td><td>Server-User, 1yr 이내, NoRITM / VDI 관련</td><td>1/2/3 미해당 S-U 전부 포함</td></tr>
-              <tr class="sev-6"><td><span class="sev-badge s6">6</span></td><td>Low</td><td>ITS Ticket 요청</td><td>S-S 2yr이내+NoRITM / AD_AUTH·DNS+Hit>0 / S-S Hit≥50</td><td>1/2/4 미해당 S-S 전부 포함</td></tr>
-              <tr class="sev-7"><td><span class="sev-badge s7">7</span></td><td>None</td><td>유지</td><td>Deny / ICMP Only / 유효 ITS(RITM+미만료) / controlled</td><td></td></tr>
-              <tr class="sev-u"><td><span class="sev-badge su">?</span></td><td>Unknown</td><td>수동 확인</td><td>User IP 대역 미설정 시 통신유형 판단 불가</td><td>Severity 1/2/7은 IP 없이도 판단 가능</td></tr>
+              <tr class="sev-7">
+                <td><span class="sev-badge s7">7</span></td>
+                <td>없음</td>
+                <td>유지</td>
+                <td>① Action = Deny<br>② ICMP 전용 서비스 (Ping 등)<br>③ RITM 등록 + 스케줄 미만료 (유효한 ITS)<br>④ 정책명에 &quot;controlled&quot; 포함 (멀티 방화벽 통과)<br>⑤ 정책명·출발지·목적지에 ADMIN 또는 MGMT 포함</td>
+                <td>예외 처리 정책 — 삭제·비활성화 대상 아님</td>
+              </tr>
+              <tr class="sev-1">
+                <td><span class="sev-badge s1">1</span></td>
+                <td>Critical</td>
+                <td>즉시 비활성화</td>
+                <td>① 출발지·목적지·서비스 <strong>모두</strong> Any·All<br>② 출발지 또는 목적지 Any·All + Hit Count = 0<br>③ 출발지 또는 목적지 Any·All + Hit Count &gt; 0이나 Last Used 1년 이상 (장기 방치)<br>④ FTP·TELNET·TFTP·RLOGIN·RSH 등 위험 서비스 <strong>단독</strong> 포함<br>⑤ 위험 서비스 + 정상 서비스 <strong>혼합</strong> + Hit Count = 0 또는 Last Used 1년 이상<br>⑥ BOSK 객체 포함<br>⑦ 정책명에 임시 키워드(temp·이관 등) + RITM 없음 + Hit Count = 0<br>⑧ 서비스 ALL + Hit Count = 0 또는 Last Used 1년 이상</td>
+                <td>비활성화 후 Hit=0 확인 시 삭제 진행</td>
+              </tr>
+              <tr class="sev-2">
+                <td><span class="sev-badge s2">2</span></td>
+                <td>High</td>
+                <td>삭제 필요</td>
+                <td>① 상태 = Disabled<br>② 스케줄 만료 (YYMMDD 날짜가 오늘 이전)<br>③ Hit=0 + Accept + Server↔User + 등록 후 1년 이상<br>④ Hit=0 + Accept + Server↔Server + always + 1년 초과</td>
+                <td>등록 1년 미만 정책은 제외. S-S 날짜 스케줄은 2년 초과 기준</td>
+              </tr>
+              <tr class="sev-3">
+                <td><span class="sev-badge s3">3</span></td>
+                <td>Medium</td>
+                <td>추가 검토 필요</td>
+                <td>① Server→User + 등록 1년 초과 + Hit &lt; 경과연도×100 + <strong>Last Used 1년 이상</strong><br>② 위험 서비스 + 정상 서비스 <strong>혼합</strong> + <strong>활성 사용(1년이내)</strong><br>③ 출발지·목적지 Any·All + 활성 사용(1년이내) + Server→User<br>④ 서비스 ALL + 활성 사용(1년이내) + Server→User</td>
+                <td>② 위험 서비스 혼합 정책: 정책 전체 삭제 금지 — <strong>위험 서비스(포트)만 제거</strong>, 나머지 정상 서비스는 유지</td>
+              </tr>
+              <tr class="sev-4">
+                <td><span class="sev-badge s4">4</span></td>
+                <td>Medium</td>
+                <td>추가 검토 필요</td>
+                <td>① Server↔Server + 등록 2년 초과 + Hit &lt; 50<br>② Server↔Server + 등록일 미상<br>③ 출발지·목적지 Any·All + 활성 사용(1년이내) + Server↔Server<br>④ 서비스 ALL + 활성 사용(1년이내) + Server↔Server</td>
+                <td>활성 Any/All 정책은 즉시 비활성화 대신 허용 범위 축소 검토 권장</td>
+              </tr>
+              <tr class="sev-5">
+                <td><span class="sev-badge s5">5</span></td>
+                <td>Low</td>
+                <td>ITS Ticket 요청</td>
+                <td>① Server→User + 등록 1년 이내 + RITM 없음<br>② Server→User + 등록 1년 초과 + Hit 부족 + <strong>Last Used 1년 미만</strong> (최근 사용 중이나 등록 미비)<br>③ VDI 관련 객체 포함 (VDI_132~135)<br>④ 서비스 ALL + 활성 사용(1년이내) + Server→User</td>
+                <td>정책은 유지하되 ITS Ticket으로 정식 등록 권장</td>
+              </tr>
+              <tr class="sev-6">
+                <td><span class="sev-badge s6">6</span></td>
+                <td>Low</td>
+                <td>ITS Ticket 요청</td>
+                <td>① AD·DNS·LDAP 등 인증/DNS 서비스 + Hit &gt; 0<br>② Server↔Server + 2년 이내 + RITM 없음<br>③ Server↔Server + Hit ≥ 50<br>④ 인프라(F1·F2·Internal) 또는 관리(MGMT) 객체 포함</td>
+                <td>정책 유지가 필요하면 ITS Ticket으로 정식 등록 권장</td>
+              </tr>
             </tbody>
           </table>
+          <p class="sev-guide-note">※ User IP 대역 미설정 시 통신 유형(Server/User) 판단 불가 — <strong>Severity 1·2·7은 IP 대역 없이도 판단 가능</strong></p>
         </div>
       </article>
 
@@ -199,44 +249,28 @@
           <span class="inline-status">입력 안 해도 Severity 1/2/7은 판단 가능. 입력 시 전체 분류 활성화.</span>
         </div>
         <div class="sev-user-range-row">
-          <input type="text" id="sevRangeInput" class="sev-user-range-input" placeholder="CIDR (예: 192.168.0.0/24)" />
+          <input type="text" id="sevRangeInput" class="sev-user-range-input" placeholder="CIDR (예: 10.99.240.0/21)" />
           <button type="button" id="sevRangeAddBtn" class="secondary-btn">추가</button>
+          <button type="button" id="sevRangeImportBtn" class="secondary-btn">파일 가져오기</button>
+          <input type="file" id="sevRangeImportFile" accept=".txt,.csv" hidden />
           <button type="button" id="sevClassifyBtn" class="primary-btn">분류 적용</button>
         </div>
         <div id="sevRangeTags" class="sev-user-range-tags"></div>
         <div class="inline-status" id="sevClassifyStatus">Config 파일을 먼저 로드하세요.</div>
       </article>
 
-      <article class="glass-card" id="sevPhase1Card" style="margin-bottom:20px;padding:20px;display:none">
-        <div class="section-heading">
-          <div><span class="section-index">Phase 1</span><h2>태그 요약</h2></div>
-        </div>
-        <div id="sevPhase1Bar" class="sev-phase1-card"></div>
-      </article>
-
       <article class="glass-card" id="sevPhase2Card" style="margin-bottom:20px;padding:20px;display:none">
         <div class="section-heading">
-          <div><span class="section-index">Phase 2</span><h2>Severity 분류 결과</h2></div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button type="button" id="aiAnalyzeBtn" class="secondary-btn">AI 분석 (hermes3)</button>
-            <button type="button" id="sevExportBtn" class="secondary-btn">Export to Excel</button>
-            <button id="ai-report-btn" onclick="aiGenerateReport()"
-              style="background:#EE2228;color:#fff;border:none;
-                     padding:6px 14px;border-radius:6px;
-                     cursor:pointer;font-weight:bold;font-size:13px;">
-              ✦ AI Audit Report
-            </button>
-          </div>
+          <div><span class="section-index">분류 결과</span><h2>Severity 분류 결과</h2></div>
+          <button type="button" id="sevExportBtn" class="secondary-btn">Export to Excel</button>
         </div>
         <div id="sevSummaryBar" class="sev-summary-bar"></div>
-        <div id="aiAnalysisResult" class="ai-analysis-box" style="display:none"></div>
       </article>
 
       <article class="glass-card" id="sevTableCard" style="padding:20px;display:none">
         <div class="sev-subtabs">
           <button class="sev-subtab-btn active" data-sev-tab="firewall">Firewall Policy</button>
           <button class="sev-subtab-btn" data-sev-tab="proxy">Proxy Policy</button>
-          <button class="sev-subtab-btn" data-sev-tab="multicast">Multicast Policy</button>
         </div>
         <div id="sevTableContent" class="sev-table-wrap"></div>
       </article>
@@ -249,5 +283,37 @@
     <div class="footer-credit">Crafted by <strong>Jayden</strong></div>
   </footer>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
+
+  <!-- 라이선스 모달 -->
+  <div id="licenseModal" class="lic-overlay hidden">
+    <div class="lic-modal">
+      <div class="lic-header">
+        <span class="section-index">Export</span>
+        <h2 style="margin:6px 0 0;font-size:20px;color:var(--text-strong)">Export 라이선스 필요</h2>
+      </div>
+
+      <div class="lic-section">
+        <div class="lic-label">라이선스 키가 있으신가요?</div>
+        <div class="lic-row">
+          <input type="text" id="licKeyInput" class="lic-input" placeholder="APO-eyJ..." autocomplete="off" />
+          <button type="button" id="licActivateBtn" class="primary-btn">활성화</button>
+        </div>
+        <div id="licActivateMsg" class="lic-msg"></div>
+      </div>
+
+      <div class="lic-divider">또는</div>
+
+      <div class="lic-section">
+        <div class="lic-label">아직 구매 전이라면</div>
+        <div class="lic-row">
+          <input type="email" id="licEmailInput" class="lic-input" placeholder="이메일 주소 입력" />
+          <button type="button" id="licBuyBtn" class="secondary-btn">구매하기 →</button>
+        </div>
+        <div class="lic-note">결제 완료 후 라이선스 키를 이메일로 발송해 드립니다.<br>1회 구매 · 영구 사용 · 폐쇄망 지원</div>
+      </div>
+
+      <button type="button" id="licCloseBtn" class="lic-close">✕</button>
+    </div>
+  </div>
 </body>
 </html>
