@@ -15,7 +15,7 @@
         </div>
         <div class="brand-copy">
           <h1>AI-Policy Optimizer <span class="apo-mark">(APO)</span></h1>
-          <p>Built for secure VDI environments and flexible network policy management across all infrastructures.</p>
+          <p>NIST SP 800-41 based firewall policy optimization and risk classification tool.</p>
         </div>
       </div>
     </div>
@@ -94,7 +94,7 @@
           <label class="filter-pill"><input type="checkbox" id="filterHitZero" /> Hit Count = 0</label>
           <label class="filter-pill"><input type="checkbox" id="filterDormantYear" /> Last Used &gt; 1 year</label>
           <label class="filter-pill"><input type="checkbox" id="filterExpiredSchedule" /> Expired schedule</label>
-          <label class="filter-pill"><input type="checkbox" id="filterNoItsRequest" /> No ITS Request</label>
+          <label class="filter-pill"><input type="checkbox" id="filterNoItsRequest" /> No Change Ticket</label>
           <label class="filter-pill filter-pill-accent"><input type="checkbox" id="filterDeletable" /> Deletable policy</label>
         </div>
         <div class="tabs">
@@ -185,61 +185,61 @@
         <div style="overflow:auto">
           <table class="severity-guide-table">
             <thead>
-              <tr><th>Severity</th><th>위험도</th><th>조치</th><th>판단 조건</th><th>비고</th></tr>
+              <tr><th>Severity</th><th>Risk Level</th><th>Action</th><th>Classification Criteria (NIST SP 800-41 / CIS Controls)</th><th>Notes</th></tr>
             </thead>
             <tbody>
               <tr class="sev-7">
                 <td><span class="sev-badge s7">7</span></td>
-                <td>없음</td>
-                <td>유지</td>
-                <td>① Action = Deny<br>② ICMP 전용 서비스 (Ping 등)<br>③ RITM 등록 + 스케줄 미만료 (유효한 ITS)<br>④ 정책명에 &quot;controlled&quot; 포함 (멀티 방화벽 통과)<br>⑤ 정책명·출발지·목적지에 ADMIN 또는 MGMT 포함</td>
-                <td>예외 처리 정책 — 삭제·비활성화 대상 아님</td>
+                <td>None</td>
+                <td>Keep rule</td>
+                <td>① Action = Deny (by design)<br>② ICMP-only service (Ping, diagnostic traffic)<br>③ Valid change ticket registered + schedule not expired<br>④ Rule name contains &quot;controlled&quot; (multi-firewall traversal policy)<br>⑤ Customer-designated admin policy object (configurable)</td>
+                <td>Compliant rules — not subject to removal or disabling</td>
               </tr>
               <tr class="sev-1">
                 <td><span class="sev-badge s1">1</span></td>
                 <td>Critical</td>
-                <td>즉시 비활성화</td>
-                <td>① 출발지·목적지·서비스 <strong>모두</strong> Any·All<br>② 출발지 또는 목적지 Any·All + Hit Count = 0<br>③ 출발지 또는 목적지 Any·All + Hit Count &gt; 0이나 Last Used 1년 이상 (장기 방치)<br>④ FTP·TELNET·TFTP·RLOGIN·RSH 등 위험 서비스 <strong>단독</strong> 포함<br>⑤ 위험 서비스 + 정상 서비스 <strong>혼합</strong> + Hit Count = 0 또는 Last Used 1년 이상<br>⑥ BOSK 객체 포함<br>⑦ 정책명에 임시 키워드(temp·이관 등) + RITM 없음 + Hit Count = 0<br>⑧ 서비스 ALL + Hit Count = 0 또는 Last Used 1년 이상</td>
-                <td>비활성화 후 Hit=0 확인 시 삭제 진행</td>
+                <td>Disable immediately</td>
+                <td>① Source, destination, AND service all Any/All (violates least-privilege)<br>② Source or destination Any/All + Hit Count = 0<br>③ Source or destination Any/All + Hit Count &gt; 0 but Last Used &gt; 1yr (long idle)<br>④ Insecure/legacy protocol only (FTP, TELNET, TFTP, RLOGIN, RSH)<br>⑤ Insecure + normal services mixed + unused or Last Used &gt; 1yr<br>⑥ Customer-designated high-risk object (configurable)<br>⑦ Temporary keyword in rule name + no change ticket + unused<br>⑧ Service ALL + unused or Last Used &gt; 1yr</td>
+                <td>Disable first; delete after confirming zero traffic</td>
               </tr>
               <tr class="sev-2">
                 <td><span class="sev-badge s2">2</span></td>
                 <td>High</td>
-                <td>삭제 필요</td>
-                <td>① 상태 = Disabled<br>② 스케줄 만료 (YYMMDD 날짜가 오늘 이전)<br>③ Hit=0 + Accept + Server↔User + 등록 후 1년 이상<br>④ Hit=0 + Accept + Server↔Server + always + 1년 초과</td>
-                <td>등록 1년 미만 정책은 제외. S-S 날짜 스케줄은 2년 초과 기준</td>
+                <td>Delete rule</td>
+                <td>① Status = Disabled<br>② Schedule expired (date-based schedule in the past)<br>③ Hit=0 + Accept + Server→User + registered &gt; 1yr ago<br>④ Hit=0 + Accept + Server↔Server + always-on + &gt; 1yr old</td>
+                <td>Rules registered &lt; 1yr are exempt. Server-Server date schedules use 2yr threshold</td>
               </tr>
               <tr class="sev-3">
                 <td><span class="sev-badge s3">3</span></td>
                 <td>Medium</td>
-                <td>추가 검토 필요</td>
-                <td>① Server→User + 등록 1년 초과 + Hit &lt; 경과연도×100 + <strong>Last Used 1년 이상</strong><br>② 위험 서비스 + 정상 서비스 <strong>혼합</strong> + <strong>활성 사용(1년이내)</strong><br>③ 출발지·목적지 Any·All + 활성 사용(1년이내) + Server→User<br>④ 서비스 ALL + 활성 사용(1년이내) + Server→User</td>
-                <td>② 위험 서비스 혼합 정책: 정책 전체 삭제 금지 — <strong>위험 서비스(포트)만 제거</strong>, 나머지 정상 서비스는 유지</td>
+                <td>Review required</td>
+                <td>① Server→User + &gt; 1yr old + Hit &lt; (age×100) + <strong>Last Used &gt; 1yr</strong><br>② Insecure + normal services <strong>mixed</strong> + <strong>actively used (&lt; 1yr)</strong><br>③ Source/dest Any/All + active use (&lt; 1yr) + Server→User<br>④ Service ALL + active use (&lt; 1yr) + Server→User</td>
+                <td>② Mixed insecure services: do NOT delete the whole rule — <strong>remove only the insecure service/port</strong></td>
               </tr>
               <tr class="sev-4">
                 <td><span class="sev-badge s4">4</span></td>
                 <td>Medium</td>
-                <td>추가 검토 필요</td>
-                <td>① Server↔Server + 등록 2년 초과 + Hit &lt; 50<br>② Server↔Server + 등록일 미상<br>③ 출발지·목적지 Any·All + 활성 사용(1년이내) + Server↔Server<br>④ 서비스 ALL + 활성 사용(1년이내) + Server↔Server</td>
-                <td>활성 Any/All 정책은 즉시 비활성화 대신 허용 범위 축소 검토 권장</td>
+                <td>Review required</td>
+                <td>① Server↔Server + &gt; 2yr old + Hit &lt; 50<br>② Server↔Server + creation date unknown<br>③ Source/dest Any/All + active use (&lt; 1yr) + Server↔Server<br>④ Service ALL + active use (&lt; 1yr) + Server↔Server</td>
+                <td>For active Any/All rules: consider scope reduction rather than immediate disable</td>
               </tr>
               <tr class="sev-5">
                 <td><span class="sev-badge s5">5</span></td>
                 <td>Low</td>
-                <td>ITS Ticket 요청</td>
-                <td>① Server→User + 등록 1년 이내 + RITM 없음<br>② Server→User + 등록 1년 초과 + Hit 부족 + <strong>Last Used 1년 미만</strong> (최근 사용 중이나 등록 미비)<br>③ VDI 관련 객체 포함 (VDI_132~135)<br>④ 서비스 ALL + 활성 사용(1년이내) + Server→User</td>
-                <td>정책은 유지하되 ITS Ticket으로 정식 등록 권장</td>
+                <td>Keep + request change ticket</td>
+                <td>① Server→User + registered &lt; 1yr + no change ticket<br>② Server→User + &gt; 1yr old + low hit count + <strong>Last Used &lt; 1yr</strong> (active but not formally registered)<br>③ Customer-designated user segment object (configurable)<br>④ Service ALL + active use (&lt; 1yr) + Server→User</td>
+                <td>Rule is operationally needed — register formally via change management process</td>
               </tr>
               <tr class="sev-6">
                 <td><span class="sev-badge s6">6</span></td>
                 <td>Low</td>
-                <td>ITS Ticket 요청</td>
-                <td>① AD·DNS·LDAP 등 인증/DNS 서비스 + Hit &gt; 0<br>② Server↔Server + 2년 이내 + RITM 없음<br>③ Server↔Server + Hit ≥ 50<br>④ 인프라(F1·F2·Internal) 또는 관리(MGMT) 객체 포함</td>
-                <td>정책 유지가 필요하면 ITS Ticket으로 정식 등록 권장</td>
+                <td>Keep + request change ticket</td>
+                <td>① AD/DNS/LDAP authentication service + Hit &gt; 0<br>② Server↔Server + &lt; 2yr old + no change ticket<br>③ Server↔Server + Hit ≥ 50 (actively used)<br>④ Customer-designated infrastructure or management object (configurable)</td>
+                <td>Rule is actively needed — register formally via change management process</td>
               </tr>
             </tbody>
           </table>
-          <p class="sev-guide-note">※ User IP 대역 미설정 시 통신 유형(Server/User) 판단 불가 — <strong>Severity 1·2·7은 IP 대역 없이도 판단 가능</strong></p>
+          <p class="sev-guide-note">※ Without User IP ranges configured, Server/User traffic type cannot be determined — <strong>Severity 1, 2, and 7 can be classified without IP ranges</strong></p>
         </div>
       </article>
 
@@ -279,7 +279,7 @@
 
   <footer class="footer-signature">
     <div class="footer-product">AI-Policy Optimizer <span class="apo-mark-dark">(APO)</span></div>
-    <div class="footer-tagline">Built for secure VDI environments and flexible network policy management across all infrastructures.</div>
+    <div class="footer-tagline">NIST SP 800-41 based firewall policy optimization and risk classification tool.</div>
     <div class="footer-credit">Crafted by <strong>Jayden</strong></div>
   </footer>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

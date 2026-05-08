@@ -40,19 +40,19 @@ function hasNoName(item) {
 }
 
 function hasNoRitm(item) {
-  return !String(item.name || '').toUpperCase().includes('RITM');
+  return !String(item.name || '').toUpperCase().includes('Change Ticket');
 }
 
-function isNoItsRequest(item) {
+function isNoTicket(item) {
   return hasNoName(item) || hasNoRitm(item);
 }
 
-function noItsReason(item) {
+function noTicketReason(item) {
   const noName = hasNoName(item);
   const noRitm = hasNoRitm(item);
-  if (noName && noRitm) return 'No Policy Name, No RITM';
+  if (noName && noRitm) return 'No Policy Name, No Change Ticket';
   if (noName) return 'No Policy Name';
-  if (noRitm) return 'No RITM';
+  if (noRitm) return 'No Change Ticket';
   return '';
 }
 
@@ -63,7 +63,7 @@ const TAB_DEFS = {
     columns: [
       ['Policy ID', i => i.policy_id ?? ''],
       ['Name', i => i.name || ''],
-      ['RITM', i => i.ritm || ''],
+      ['Change Ticket', i => i.ticket || item.ticket || item.ritm || ''],
       ['Request Date', i => i.request_date || ''],
       ['Requester', i => i.requester || ''],
       ['Controlled', i => i.is_controlled ? 'Yes' : ''],
@@ -77,7 +77,7 @@ const TAB_DEFS = {
       ['Action', i => i.action || ''],
       ['Hit Count', i => i.hit_count ?? '-'],
       ['Last Used', i => i.last_used || '-'],
-      ['No ITS Request Reason', i => noItsReason(i)],
+      ['No Change Ticket Reason', i => noTicketReason(i)],
     ],
   },
   firewall_proxy_policy: {
@@ -86,7 +86,7 @@ const TAB_DEFS = {
     columns: [
       ['Policy ID', i => i.policy_id ?? ''],
       ['Name', i => i.name || ''],
-      ['RITM', i => i.ritm || ''],
+      ['Change Ticket', i => i.ticket || item.ticket || item.ritm || ''],
       ['Request Date', i => i.request_date || ''],
       ['Requester', i => i.requester || ''],
       ['Controlled', i => i.is_controlled ? 'Yes' : ''],
@@ -100,7 +100,7 @@ const TAB_DEFS = {
       ['Action', i => i.action || ''],
       ['Hit Count', i => i.hit_count ?? '-'],
       ['Last Used', i => i.last_used || '-'],
-      ['No ITS Request Reason', i => noItsReason(i)],
+      ['No Change Ticket Reason', i => noTicketReason(i)],
     ],
   },
   firewall_multicast_policy: {
@@ -109,7 +109,7 @@ const TAB_DEFS = {
     columns: [
       ['Policy ID', i => i.policy_id ?? ''],
       ['Name', i => i.name || ''],
-      ['RITM', i => i.ritm || ''],
+      ['Change Ticket', i => i.ticket || item.ticket || item.ritm || ''],
       ['Request Date', i => i.request_date || ''],
       ['Source Interface', i => joinList(i.srcintf_display)],
       ['Destination Interface', i => joinList(i.dstintf_display)],
@@ -441,7 +441,7 @@ function getFilteredItems(tabName = activeTab) {
       items = items.filter(isExpiredSchedulePolicy);
     }
     if (filterNoItsRequest.checked) {
-      items = items.filter(isNoItsRequest);
+      items = items.filter(isNoTicket);
     }
     if (filterDeletable.checked) {
       items = items.filter(item => isDisabledPolicy(item) || isExpiredSchedulePolicy(item));
@@ -497,7 +497,7 @@ function renderPolicyTable(items) {
     const flags = [];
     if (isExpiredSchedulePolicy(item)) flags.push('<span class="mini-flag warn">Expired schedule</span>');
     if (isDormantOneYear(item)) flags.push('<span class="mini-flag cool">Last used > 1y</span>');
-    if (isNoItsRequest(item)) flags.push(`<span class="mini-flag neutral">No ITS Request: ${escapeHtml(noItsReason(item))}</span>`);
+    if (isNoTicket(item)) flags.push(`<span class="mini-flag neutral">No Change Ticket: ${escapeHtml(noTicketReason(item))}</span>`);
     if (isDisabledPolicy(item) || isExpiredSchedulePolicy(item)) flags.push('<span class="mini-flag danger">Deletable</span>');
 
     return `
@@ -519,7 +519,7 @@ function renderPolicyTable(items) {
       <td>${escapeHtml(item.action || '')}</td>
       <td>${item.hit_count != null ? escapeHtml(String(item.hit_count)) : '<span class="muted">-</span>'}</td>
       <td>${escapeHtml(item.last_used || '-')}</td>
-      <td>${escapeHtml(noItsReason(item))}</td>
+      <td>${escapeHtml(noTicketReason(item))}</td>
     </tr>
   `}).join('');
 
@@ -538,7 +538,7 @@ function renderPolicyTable(items) {
         <th>Action</th>
         <th>Hit Count</th>
         <th>Last Used</th>
-        <th>No ITS Reason</th>
+        <th>No Change Ticket Reason</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>
@@ -550,7 +550,7 @@ function renderMulticastTable(items) {
     <tr>
       <td>${escapeHtml(item.policy_id ?? '')}</td>
       <td>${escapeHtml(item.name || '') || '<span class="muted">-</span>'}</td>
-      <td>${escapeHtml(item.ritm || '')}</td>
+      <td>${escapeHtml(item.ticket || item.ticket || item.ritm || '')}</td>
       <td>${escapeHtml(item.request_date || '')}</td>
       <td>${renderList(item.srcintf_display)}</td>
       <td>${renderList(item.dstintf_display)}</td>
@@ -566,7 +566,7 @@ function renderMulticastTable(items) {
   tabContent.innerHTML = tableShell(`
     <thead>
       <tr>
-        <th>Policy ID</th><th>Name</th><th>RITM</th><th>Request Date</th>
+        <th>Policy ID</th><th>Name</th><th>Change Ticket</th><th>Request Date</th>
         <th>Source Interface</th><th>Destination Interface</th>
         <th>Source Address</th><th>Destination Address</th>
         <th>Action</th><th>Status</th><th>Schedule</th><th>Comment</th>
@@ -878,7 +878,7 @@ checkLicense();
     "No HitCount":      "tag-gray",
     "Last Used > 1yr":  "tag-amber",
     "Expired Schedule": "tag-gray",
-    "No ITS Request":   "tag-amber",
+    "No Change Ticket":   "tag-amber",
     "Temp Rule":        "tag-red",
     "Risky Service":    "tag-red",
     "Deny Rule":        "tag-green",
@@ -967,7 +967,7 @@ checkLicense();
         <td><div class="badge-list">${tagHtml||'-'}</div></td>
         <td>${escapeHtml(String(p.policy_id??''))}</td>
         <td>${escapeHtml(p.name||'')}</td>
-        <td>${escapeHtml(p.ritm||'')}</td>
+        <td>${escapeHtml(p.ticket || item.ticket || item.ritm||'')}</td>
         <td>${escapeHtml(p.request_date||'')}</td>
         <td><div class="badge-list">${mkBadges(p.srcaddr_display)}</div></td>
         <td><div class="badge-list">${mkBadges(p.dstaddr_display)}</div></td>
@@ -983,7 +983,7 @@ checkLicense();
     }).join('');
     tableContent.innerHTML=`<table class="result-table"><thead><tr>
       <th>Sev</th><th>위험도</th><th>Tags</th><th>Policy ID</th><th>Name</th>
-      <th>RITM</th><th>Request Date</th><th>Source</th><th>Destination</th>
+      <th>Change Ticket</th><th>Request Date</th><th>Source</th><th>Destination</th>
       <th>Service</th><th>Action</th><th>Status</th><th>Hit Count</th><th>Last Used</th>
       <th>Traffic Type</th><th>Reason</th><th>Recommended Action</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
