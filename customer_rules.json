@@ -1,0 +1,9 @@
+{
+  "_comment": "APO-public 범용 고객 설정 파일. 고객 환경에 맞게 값을 수정하세요.",
+  "bosk_objects": [],
+  "vdi_objects": [],
+  "mgmt_objects": [],
+  "infra_objects": [],
+  "extra_temp_keywords": [],
+  "severity_overrides": {}
+}
