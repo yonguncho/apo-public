@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI-Policy Optimizer (APO)</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="brand">
+        <div class="brand-badge">
+          <img src="{{ url_for('static', filename='skax-logo.png') }}" alt="APO logo" class="logo" />
+        </div>
+        <div class="brand-copy">
+          <h1>AI-Policy Optimizer <span class="apo-mark">(APO)</span></h1>
+          <p>Built for secure VDI environments and flexible network policy management across all infrastructures.</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="view-switch-card">
+      <button type="button" class="view-switch-btn active" data-view="analysis">Policy Analysis</button>
+      <button type="button" class="view-switch-btn" data-view="diff">Configuration Change Review</button>
+      <button type="button" class="view-switch-btn" data-view="severity">Severity Results</button>
+    </section>
+
+    <section id="analysisView" class="page-view">
+      <div class="page-intro-card">
+        <span class="section-index">Policy Optimization</span>
+        <h2>Firewall Policy Analysis</h2>
+        <p>Upload the current FortiGate configuration and GUI policy CSV to review policy status, usage data, objects, services, and optimization candidates.</p>
+      </div>
+
+      <div class="quick-upload analysis-upload">
+        <div class="quick-upload-card">
+          <div>
+            <strong>Config File</strong>
+            <span id="selectedConfigName" class="file-name">No file selected</span>
+          </div>
+          <button type="button" id="configPickerBtn" class="primary-btn">Config File</button>
+          <input type="file" id="configFile" name="config_file" accept=".conf,.txt" hidden />
+        </div>
+        <div class="quick-upload-card">
+          <div>
+            <strong>Policy CSV</strong>
+            <span id="selectedPolicyCsvName" class="file-name">No file selected</span>
+          </div>
+          <button type="button" id="policyCsvPickerBtn" class="secondary-btn">Policy CSV</button>
+          <input type="file" id="policyStatsFiles" name="policy_stats_files" accept=".csv,.txt" hidden />
+        </div>
+      </div>
+
+      <section class="summary-grid">
+        <article class="glass-card">
+          <div class="section-heading">
+            <div><span class="section-index">01</span><h2>Config Summary</h2></div>
+            <span id="configStatus" class="inline-status">Load a FortiGate config file.</span>
+          </div>
+          <div id="metaBox" class="summary-stats"></div>
+          <div id="downloadBox" class="link-row"></div>
+        </article>
+        <article class="glass-card">
+          <div class="section-heading">
+            <div><span class="section-index">02</span><h2>Policy CSV Summary</h2></div>
+            <span id="policyStatsStatus" class="inline-status">Import GUI policy CSV to merge Last Used, Hit Count, and Status.</span>
+          </div>
+          <div id="policyCsvSummary" class="summary-stats summary-stats-compact"></div>
+        </article>
+      </section>
+
+      <section class="workspace-card">
+        <div class="workspace-topbar">
+          <div class="search-wrap"><input type="search" id="tableFilter" placeholder="Search within the current tab..." /></div>
+          <div class="toolbar-actions">
+            <button type="button" id="downloadCsvBtn" class="secondary-btn">Download Current Tab CSV</button>
+            <button type="button" id="downloadWorkbookBtn" class="secondary-btn secondary-btn-soft">Download All Tabs Excel</button>
+            <span id="tabCount" class="inline-status"></span>
+          </div>
+        </div>
+        <div id="policyOnlyFilters" class="filter-row hidden">
+          <label class="filter-pill"><input type="checkbox" id="filterDisabled" /> Disabled only</label>
+          <label class="filter-pill"><input type="checkbox" id="filterHitZero" /> Hit Count = 0</label>
+          <label class="filter-pill"><input type="checkbox" id="filterDormantYear" /> Last Used &gt; 1 year</label>
+          <label class="filter-pill"><input type="checkbox" id="filterExpiredSchedule" /> Expired schedule</label>
+          <label class="filter-pill"><input type="checkbox" id="filterNoItsRequest" /> No ITS Request</label>
+          <label class="filter-pill filter-pill-accent"><input type="checkbox" id="filterDeletable" /> Deletable policy</label>
+        </div>
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="firewall_policy">Firewall Policy</button>
+          <button class="tab-btn" data-tab="firewall_proxy_policy">Firewall Proxy Policy</button>
+          <button class="tab-btn" data-tab="firewall_multicast_policy">Multicast Policy</button>
+          <button class="tab-btn" data-tab="firewall_address">Firewall Address</button>
+          <button class="tab-btn" data-tab="firewall_addrgrp">Firewall AddrGrp</button>
+          <button class="tab-btn" data-tab="firewall_proxy_address">Proxy Address</button>
+          <button class="tab-btn" data-tab="firewall_proxy_addrgrp">Proxy AddrGrp</button>
+          <button class="tab-btn" data-tab="firewall_service_custom">Service Custom</button>
+          <button class="tab-btn" data-tab="firewall_service_group">Service Group</button>
+          <button class="tab-btn" data-tab="system_interface">Interface</button>
+        </div>
+        <div id="tabContent"></div>
+      </section>
+    </section>
+
+    <section id="diffView" class="page-view hidden">
+      <article class="glass-card diff-card">
+        <div class="section-heading">
+          <div><span class="section-index">Configuration Drift Analysis</span><h2>Configuration Change Review</h2></div>
+          <span id="diffStatus" class="inline-status">Upload two FortiGate config backups to compare configuration changes.</span>
+        </div>
+
+        <div class="diff-hero-panel">
+          <div>
+            <div class="diff-eyebrow">Change Review Workspace</div>
+            <p>Compare a baseline configuration against a target configuration to identify policy additions, deletions, modified settings, object changes, and other configuration areas that may require review.</p>
+          </div>
+          <div class="diff-method-card"><span>Comparison Basis</span><strong>FortiGate Config Backup</strong></div>
+        </div>
+
+        <div class="diff-upload-grid">
+          <div class="diff-upload-tile">
+            <div><strong>Baseline Configuration</strong><span id="selectedOldConfigName" class="file-name dark-file-name">No file selected</span></div>
+            <button type="button" id="oldConfigPickerBtn" class="secondary-btn">Choose Baseline</button>
+            <input type="file" id="oldConfigFile" accept=".conf,.txt" hidden />
+          </div>
+          <div class="diff-upload-tile">
+            <div><strong>Target Configuration</strong><span id="selectedNewConfigName" class="file-name dark-file-name">No file selected</span></div>
+            <button type="button" id="newConfigPickerBtn" class="secondary-btn">Choose Target</button>
+            <input type="file" id="newConfigFile" accept=".conf,.txt" hidden />
+          </div>
+          <div class="diff-upload-actions"><button type="button" id="runDiffBtn" class="primary-btn">Analyze Configuration Changes</button></div>
+        </div>
+
+        <div id="diffProgress" class="diff-progress hidden">
+          <div class="diff-progress-header">
+            <strong id="diffProgressTitle">Preparing analysis...</strong>
+            <span id="diffProgressPercent">0%</span>
+          </div>
+          <div class="diff-progress-track">
+            <div id="diffProgressBar" class="diff-progress-bar" style="width: 0%"></div>
+          </div>
+          <div id="diffProgressStep" class="diff-progress-step">Waiting for files.</div>
+        </div>
+
+        <div class="diff-result-layout">
+          <aside class="diff-category-panel">
+            <div class="diff-category-title">Change Categories</div>
+            <button class="diff-category-btn active" data-diff-tab="overview">Overview</button>
+            <button class="diff-category-btn" data-diff-tab="added_policies">Added Policies</button>
+            <button class="diff-category-btn" data-diff-tab="removed_policies">Removed Policies</button>
+            <button class="diff-category-btn" data-diff-tab="changed_policies">Changed Policies</button>
+            <button class="diff-category-btn" data-diff-tab="added_objects">Added Objects</button>
+            <button class="diff-category-btn" data-diff-tab="removed_objects">Removed Objects</button>
+            <button class="diff-category-btn" data-diff-tab="other_changes">Other Configuration Changes</button>
+          </aside>
+          <div class="diff-result-panel">
+            <div id="diffSummary" class="summary-stats diff-summary-grid"></div>
+            <div id="diffTabContent"><div class="empty-state"><strong>No comparison result yet.</strong><span>Select two configuration files and run the analysis.</span></div></div>
+          </div>
+        </div>
+      </article>
+    </section>
+    <section id="severityView" class="page-view hidden">
+      <div class="page-intro-card">
+        <span class="section-index">Severity Classification</span>
+        <h2>Policy Risk Assessment</h2>
+        <p>NIST SP 800-41 기반 긴급도 분류. Config 파일 로드 후 즉시 태그 분석(Phase 1), User IP 대역 입력 시 완전 분류(Phase 2).</p>
+      </div>
+
+      <article class="glass-card" style="margin-bottom:20px;padding:20px">
+        <div class="section-heading">
+          <div><span class="section-index">Guide</span><h2>Severity Classification Criteria</h2></div>
+        </div>
+        <div style="overflow:auto">
+          <table class="severity-guide-table">
+            <thead>
+              <tr><th>Severity</th><th>위험도</th><th>조치</th><th>판단 조건</th><th>비고</th></tr>
+            </thead>
+            <tbody>
+              <tr class="sev-1"><td><span class="sev-badge s1">1</span></td><td>Critical</td><td>즉시 비활성화</td><td>Any/All 정책 / FTP·TELNET / Temp+NoRITM / BOSK 객체</td><td>비활성화 후 Hit=0 되면 삭제</td></tr>
+              <tr class="sev-2"><td><span class="sev-badge s2">2</span></td><td>High</td><td>삭제</td><td>Disabled / 만료 Schedule / Hit=0+Accept+기간초과</td><td>S-S: always→1yr초과 / 날짜지정→2yr초과</td></tr>
+              <tr class="sev-3"><td><span class="sev-badge s3">3</span></td><td>Medium</td><td>DT 검증 후 결정</td><td>Server-User, 1yr 초과, Hit &lt; 경과연도×100</td><td>등록연도 미상 → 2021년 기준</td></tr>
+              <tr class="sev-4"><td><span class="sev-badge s4">4</span></td><td>Medium</td><td>DT 검증 후 결정</td><td>Server-Server, 2yr 초과, Hit &lt; 50 / 등록일 미상</td><td>S-S Schedule 날짜 기준 2yr 초과도 해당</td></tr>
+              <tr class="sev-5"><td><span class="sev-badge s5">5</span></td><td>Low</td><td>ITS Ticket 요청</td><td>Server-User, 1yr 이내, NoRITM / VDI 관련</td><td>1/2/3 미해당 S-U 전부 포함</td></tr>
+              <tr class="sev-6"><td><span class="sev-badge s6">6</span></td><td>Low</td><td>ITS Ticket 요청</td><td>S-S 2yr이내+NoRITM / AD_AUTH·DNS+Hit>0 / S-S Hit≥50</td><td>1/2/4 미해당 S-S 전부 포함</td></tr>
+              <tr class="sev-7"><td><span class="sev-badge s7">7</span></td><td>None</td><td>유지</td><td>Deny / ICMP Only / 유효 ITS(RITM+미만료) / controlled</td><td></td></tr>
+              <tr class="sev-u"><td><span class="sev-badge su">?</span></td><td>Unknown</td><td>수동 확인</td><td>User IP 대역 미설정 시 통신유형 판단 불가</td><td>Severity 1/2/7은 IP 없이도 판단 가능</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="glass-card" style="margin-bottom:20px;padding:20px">
+        <div class="section-heading">
+          <div><span class="section-index">Step 1</span><h2>User IP 대역 설정</h2></div>
+          <span class="inline-status">입력 안 해도 Severity 1/2/7은 판단 가능. 입력 시 전체 분류 활성화.</span>
+        </div>
+        <div class="sev-user-range-row">
+          <input type="text" id="sevRangeInput" class="sev-user-range-input" placeholder="CIDR (예: 192.168.0.0/24)" />
+          <button type="button" id="sevRangeAddBtn" class="secondary-btn">추가</button>
+          <button type="button" id="sevClassifyBtn" class="primary-btn">분류 적용</button>
+        </div>
+        <div id="sevRangeTags" class="sev-user-range-tags"></div>
+        <div class="inline-status" id="sevClassifyStatus">Config 파일을 먼저 로드하세요.</div>
+      </article>
+
+      <article class="glass-card" id="sevPhase1Card" style="margin-bottom:20px;padding:20px;display:none">
+        <div class="section-heading">
+          <div><span class="section-index">Phase 1</span><h2>태그 요약</h2></div>
+        </div>
+        <div id="sevPhase1Bar" class="sev-phase1-card"></div>
+      </article>
+
+      <article class="glass-card" id="sevPhase2Card" style="margin-bottom:20px;padding:20px;display:none">
+        <div class="section-heading">
+          <div><span class="section-index">Phase 2</span><h2>Severity 분류 결과</h2></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" id="aiAnalyzeBtn" class="secondary-btn">AI 분석 (hermes3)</button>
+            <button type="button" id="sevExportBtn" class="secondary-btn">Export to Excel</button>
+            <button id="ai-report-btn" onclick="aiGenerateReport()"
+              style="background:#EE2228;color:#fff;border:none;
+                     padding:6px 14px;border-radius:6px;
+                     cursor:pointer;font-weight:bold;font-size:13px;">
+              ✦ AI Audit Report
+            </button>
+          </div>
+        </div>
+        <div id="sevSummaryBar" class="sev-summary-bar"></div>
+        <div id="aiAnalysisResult" class="ai-analysis-box" style="display:none"></div>
+      </article>
+
+      <article class="glass-card" id="sevTableCard" style="padding:20px;display:none">
+        <div class="sev-subtabs">
+          <button class="sev-subtab-btn active" data-sev-tab="firewall">Firewall Policy</button>
+          <button class="sev-subtab-btn" data-sev-tab="proxy">Proxy Policy</button>
+          <button class="sev-subtab-btn" data-sev-tab="multicast">Multicast Policy</button>
+        </div>
+        <div id="sevTableContent" class="sev-table-wrap"></div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer-signature">
+    <div class="footer-product">AI-Policy Optimizer <span class="apo-mark-dark">(APO)</span></div>
+    <div class="footer-tagline">Built for secure VDI environments and flexible network policy management across all infrastructures.</div>
+    <div class="footer-credit">Crafted by <strong>Jayden</strong></div>
+  </footer>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

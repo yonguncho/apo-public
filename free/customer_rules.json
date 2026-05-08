@@ -1,0 +1,19 @@
+{
+  "_comment": "APO-public 범용 고객 설정 파일 (NIST SP 800-41 기반). 고객 환경에 맞게 값을 수정하세요.",
+  "_fields": {
+    "high_risk_objects":    "항상 Critical(S1)로 분류할 오브젝트 목록 (예: DMZ 서버, 보안 위반 오브젝트)",
+    "user_segment_objects": "사용자 세그먼트 오브젝트 목록 → Low-High(S5) 분류",
+    "mgmt_objects":         "관리 망 오브젝트 목록 → Low-Low(S6) 분류",
+    "infra_objects":        "인프라 오브젝트 목록 → Low-Low(S6) 분류",
+    "admin_objects":        "관리자 전용 정책 오브젝트 → Keep(S7) 분류",
+    "extra_temp_keywords":  "임시 정책 판단에 추가할 키워드 (영문/한글 모두 가능)",
+    "severity_overrides":   "특정 오브젝트의 심각도를 직접 지정: {오브젝트명: 심각도(1~7)}"
+  },
+  "high_risk_objects":    [],
+  "user_segment_objects": [],
+  "mgmt_objects":         [],
+  "infra_objects":        [],
+  "admin_objects":        [],
+  "extra_temp_keywords":  [],
+  "severity_overrides":   {}
+}
