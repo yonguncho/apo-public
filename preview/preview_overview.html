@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>APO UI Preview — Policy Analysis</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --card: #1e2130;
+    --border: #2a2e42; --accent: #6366f1; --accent2: #818cf8;
+    --green: #22c55e; --yellow: #eab308; --red: #ef4444; --orange: #f97316;
+    --text: #e2e8f0; --muted: #94a3b8; --faint: #475569;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(135deg, #1a1d27 0%, #12151f 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    display: flex; align-items: center; gap: 16px; height: 60px;
+  }
+  .logo-ring {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), #4f46e5);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 14px; color: #fff; letter-spacing: -0.5px;
+  }
+  .header-title { font-size: 15px; font-weight: 600; color: var(--text); }
+  .header-sub   { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .badge-preview {
+    margin-left: auto; background: var(--accent); color: #fff;
+    padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+  }
+
+  /* ── Nav tabs ── */
+  .nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; gap: 2px; }
+  .nav-tab {
+    padding: 12px 16px; font-size: 13px; font-weight: 500; color: var(--muted);
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s;
+  }
+  .nav-tab.active { color: var(--accent2); border-bottom-color: var(--accent); }
+
+  /* ── Main layout ── */
+  .main { max-width: 1280px; margin: 0 auto; padding: 28px 32px; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px 24px; margin-bottom: 20px;
+  }
+  .card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .card-index { font-size: 10px; font-weight: 700; color: var(--accent2); text-transform: uppercase; letter-spacing: .8px; }
+  .card-title { font-size: 16px; font-weight: 600; color: var(--text); }
+  .card-status { margin-left: auto; font-size: 12px; color: var(--muted); }
+
+  /* ── Upload strip ── */
+  .upload-strip { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .upload-tile {
+    background: var(--surface); border: 1.5px dashed var(--border);
+    border-radius: var(--radius-sm); padding: 14px 16px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    transition: border-color .15s;
+  }
+  .upload-tile:hover { border-color: var(--accent); }
+  .upload-tile .label { font-size: 12px; font-weight: 600; color: var(--text); }
+  .upload-tile .fname { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .btn-primary {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 7px 14px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .btn-secondary {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 14px; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  }
+
+  /* ── Stat grid ── */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat-tile {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 14px 16px;
+  }
+  .stat-tile .st-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .stat-tile .st-val   { font-size: 22px; font-weight: 700; color: var(--text); margin-top: 4px; }
+  .stat-tile .st-sub   { font-size: 11px; color: var(--faint); margin-top: 2px; }
+  .accent-green .st-val { color: var(--green); }
+  .accent-red   .st-val { color: var(--red); }
+  .accent-yellow .st-val { color: var(--yellow); }
+
+  /* ── Toolbar ── */
+  .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .search-input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 12px; color: var(--text); font-size: 13px;
+  }
+
+  /* ── Filter pills ── */
+  .filter-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .pill {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px 11px; font-size: 11px; cursor: pointer;
+  }
+  .pill.active { border-color: var(--accent); color: var(--accent2); background: #1e2040; }
+  .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* ── Tab strip ── */
+  .tab-strip { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 0; gap: 0; }
+  .tab-btn {
+    padding: 9px 16px; font-size: 12px; font-weight: 500; color: var(--muted);
+    background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer;
+  }
+  .tab-btn.active { color: var(--accent2); border-bottom-color: var(--accent); }
+
+  /* ── Table ── */
+  .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .data-table th {
+    text-align: left; padding: 8px 12px; color: var(--muted); font-weight: 600;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table td { padding: 9px 12px; border-bottom: 1px solid #1e2130; color: var(--text); }
+  .data-table tr:hover td { background: #1a1e2d; }
+  .badge {
+    display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600;
+  }
+  .badge-enabled  { background: #14532d; color: var(--green); }
+  .badge-disabled { background: #3b1a1a; color: #fca5a5; }
+  .badge-zero     { background: #2d1f0e; color: var(--orange); }
+  .badge-old      { background: #2d1b0e; color: #fb923c; }
+
+  /* ── Row count ── */
+  .row-count { font-size: 11px; color: var(--muted); margin-top: 10px; }
+
+  /* ── Two-col summary ── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  .note-banner {
+    background: #1a1d2e; border: 1px solid #2a2e50; border-radius: var(--radius-sm);
+    padding: 10px 16px; font-size: 12px; color: #94a3b8; margin-bottom: 12px;
+  }
+  .note-banner strong { color: var(--accent2); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo-ring">APO</div>
+  <div>
+    <div class="header-title">AI-Policy Optimizer <span style="color:var(--muted);font-weight:400">(APO)</span></div>
+    <div class="header-sub">AI-Powered Policy Automation · FortiGate</div>
+  </div>
+  <div class="badge-preview">UI Preview</div>
+</div>
+
+<nav class="nav">
+  <div class="nav-tab active">Policy Analysis</div>
+  <div class="nav-tab">Config Change Review</div>
+  <div class="nav-tab">Severity Results</div>
+  <div class="nav-tab">Remediation</div>
+  <div class="nav-tab">Version Advisor</div>
+</nav>
+
+<div class="main">
+
+  <!-- Upload strip -->
+  <div class="note-banner"><strong>Design Preview Only.</strong> This file shows the proposed redesign — no functionality. Open in a browser to review layout.</div>
+
+  <div class="upload-strip">
+    <div class="upload-tile">
+      <div>
+        <div class="label">Config File</div>
+        <div class="fname">FGT1KD_backup_2026.conf</div>
+      </div>
+      <button class="btn-primary">Replace</button>
+    </div>
+    <div class="upload-tile">
+      <div>
+        <div class="label">Firewall Policy CSV</div>
+        <div class="fname">policy_export_FW.csv</div>
+      </div>
+      <button class="btn-secondary">FW Policy CSV</button>
+    </div>
+    <div class="upload-tile">
+      <div>
+        <div class="label">Proxy Policy CSV</div>
+        <div class="fname">No file selected</div>
+      </div>
+      <button class="btn-secondary">Proxy CSV</button>
+    </div>
+  </div>
+
+  <!-- Summary row -->
+  <div class="two-col" style="margin-bottom:20px">
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header">
+        <div>
+          <div class="card-index">01 · Config Summary</div>
+          <div class="card-title">Device Information</div>
+        </div>
+        <a href="#" style="margin-left:auto;font-size:12px;color:var(--accent2)">Download Excel ↓</a>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-tile">
+          <div class="st-label">Model</div>
+          <div class="st-val" style="font-size:16px">FortiGate 1000D</div>
+        </div>
+        <div class="stat-tile">
+          <div class="st-label">FortiOS Version</div>
+          <div class="st-val" style="font-size:16px">7.2.4</div>
+        </div>
+        <div class="stat-tile">
+          <div class="st-label">FW Policies</div>
+          <div class="st-val">284</div>
+        </div>
+        <div class="stat-tile accent-yellow">
+          <div class="st-label">Disabled Policies</div>
+          <div class="st-val">37</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header">
+        <div>
+          <div class="card-index">02 · Policy CSV</div>
+          <div class="card-title">Usage Statistics</div>
+        </div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-tile accent-red">
+          <div class="st-label">Hit Count = 0</div>
+          <div class="st-val">52</div>
+          <div class="st-sub">never used</div>
+        </div>
+        <div class="stat-tile accent-yellow">
+          <div class="st-label">Unused ≥ 1 Year</div>
+          <div class="st-val">29</div>
+          <div class="st-sub">last hit >1yr ago</div>
+        </div>
+        <div class="stat-tile">
+          <div class="st-label">No ITS Request</div>
+          <div class="st-val">18</div>
+          <div class="st-sub">unregistered</div>
+        </div>
+        <div class="stat-tile accent-red">
+          <div class="st-label">Expired Schedule</div>
+          <div class="st-val">4</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table workspace -->
+  <div class="card">
+    <div class="toolbar">
+      <input class="search-input" placeholder="Search within current tab…" value="" />
+      <button class="btn-secondary">Download CSV</button>
+      <button class="btn-secondary">Download All (Excel)</button>
+      <span style="font-size:12px;color:var(--muted);white-space:nowrap">284 rows</span>
+    </div>
+
+    <div class="filter-pills">
+      <div class="pill"><span class="pill-dot"></span>Disabled only</div>
+      <div class="pill active"><span class="pill-dot"></span>Hit Count = 0</div>
+      <div class="pill"><span class="pill-dot"></span>Last Used &gt; 1 year</div>
+      <div class="pill"><span class="pill-dot"></span>Expired schedule</div>
+      <div class="pill"><span class="pill-dot"></span>No ITS Request</div>
+      <div class="pill" style="border-color:var(--red);color:#fca5a5;background:#1e1010"><span class="pill-dot"></span>Deletable policy</div>
+    </div>
+
+    <div class="tab-strip">
+      <button class="tab-btn active">Firewall Policy</button>
+      <button class="tab-btn">Firewall Proxy Policy</button>
+      <button class="tab-btn">Multicast Policy</button>
+      <button class="tab-btn">Firewall Address</button>
+      <button class="tab-btn">Service Custom</button>
+      <button class="tab-btn">Interface</button>
+    </div>
+
+    <table class="data-table" style="margin-top:0">
+      <thead>
+        <tr>
+          <th>ID</th><th>Name</th><th>Status</th><th>Src Interface</th><th>Dst Interface</th>
+          <th>Source</th><th>Destination</th><th>Service</th><th>Hit Count</th><th>Last Used</th><th>Schedule</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td><td>Allow_Internet_Users</td><td><span class="badge badge-enabled">Enabled</span></td>
+          <td>internal</td><td>wan1</td><td>10.99.240.0/21</td><td>all</td><td>HTTP,HTTPS</td>
+          <td>0</td><td style="color:var(--red)">Never</td><td>always</td>
+        </tr>
+        <tr>
+          <td>2</td><td>TEMP_FTP_Access</td><td><span class="badge badge-enabled">Enabled</span></td>
+          <td>internal</td><td>wan1</td><td>any</td><td>any</td><td>FTP</td>
+          <td><span class="badge badge-zero">0</span></td><td style="color:var(--red)">2023-01-14</td><td>always</td>
+        </tr>
+        <tr>
+          <td>3</td><td>Server_to_Server_Backup</td><td><span class="badge badge-disabled">Disabled</span></td>
+          <td>dmz</td><td>internal</td><td>SRV-01</td><td>SRV-DB-01</td><td>SSH</td>
+          <td>—</td><td>—</td><td>always</td>
+        </tr>
+        <tr>
+          <td>4</td><td>Legacy_Telnet_Admin</td><td><span class="badge badge-enabled">Enabled</span></td>
+          <td>internal</td><td>dmz</td><td>ADMIN_MGMT</td><td>SRV-OLD-01</td><td>TELNET</td>
+          <td>2</td><td><span class="badge badge-old">2024-06-12</span></td><td>always</td>
+        </tr>
+        <tr>
+          <td>5</td><td>Dev_Lab_Any</td><td><span class="badge badge-enabled">Enabled</span></td>
+          <td>lab</td><td>wan1</td><td>192.168.100.0/24</td><td>any</td><td>ALL</td>
+          <td>0</td><td style="color:var(--red)">Never</td><td>always</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="row-count">Showing 5 of 52 filtered rows (Hit Count = 0)</div>
+  </div>
+
+</div>
+</body>
+</html>

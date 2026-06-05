@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>APO UI Preview — Severity Results</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --card: #1e2130; --border: #2a2e42;
+    --accent: #6366f1; --accent2: #818cf8;
+    --c1: #ef4444; --c2: #f97316; --c3: #eab308; --c4: #a78bfa;
+    --c5: #60a5fa; --c6: #34d399; --c7: #6b7280;
+    --text: #e2e8f0; --muted: #94a3b8; --faint: #475569;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+
+  .header {
+    background: #1a1d27; border-bottom: 1px solid var(--border);
+    padding: 0 32px; display: flex; align-items: center; gap: 16px; height: 60px;
+  }
+  .logo-ring { width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#4f46e5);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#fff; }
+  .nav { background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:2px; }
+  .nav-tab { padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent; }
+  .nav-tab.active { color:var(--accent2);border-bottom-color:var(--accent); }
+  .badge-preview { margin-left:auto;background:var(--accent);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600; }
+  .main { max-width:1280px;margin:0 auto;padding:28px 32px; }
+  .card { background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;margin-bottom:20px; }
+  .card-header { display:flex;align-items:center;gap:12px;margin-bottom:16px; }
+  .card-index { font-size:10px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.8px; }
+  .card-title { font-size:16px;font-weight:600;color:var(--text); }
+  .btn-primary { background:var(--accent);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer; }
+  .btn-secondary { background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer; }
+
+  /* ── Severity guide table ── */
+  .sev-guide { width:100%;border-collapse:collapse;font-size:12px; }
+  .sev-guide th { padding:8px 12px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);text-align:left; }
+  .sev-guide td { padding:10px 12px;border-bottom:1px solid #1e2130;vertical-align:top; }
+  .sev-guide tr:hover td { background:#1a1e2d; }
+  .sev-badge {
+    display:inline-flex;align-items:center;justify-content:center;
+    width:24px;height:24px;border-radius:6px;font-weight:700;font-size:12px;
+  }
+  .s1 { background:#3b1212;color:var(--c1); }
+  .s2 { background:#2d1a0a;color:var(--c2); }
+  .s3 { background:#2d2508;color:var(--c3); }
+  .s4 { background:#1e1a35;color:var(--c4); }
+  .s5 { background:#1a2035;color:var(--c5); }
+  .s6 { background:#0f2a22;color:var(--c6); }
+  .s7 { background:#1e2028;color:var(--c7); }
+  .risk-pill {
+    display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;
+  }
+  .r-critical { background:#3b1212;color:var(--c1); }
+  .r-high     { background:#2d1a0a;color:var(--c2); }
+  .r-medium   { background:#2d2508;color:var(--c3); }
+  .r-low      { background:#0f2a22;color:var(--c6); }
+  .r-none     { background:#1e2028;color:var(--c7); }
+
+  /* ── Range input ── */
+  .range-row { display:flex;gap:8px;align-items:center;margin-bottom:10px; }
+  .range-input { flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px; }
+  .tag-list { display:flex;flex-wrap:wrap;gap:6px;margin-top:8px; }
+  .tag { background:#1e2240;border:1px solid #3a3f6e;border-radius:4px;padding:3px 10px;font-size:11px;color:var(--accent2); }
+
+  /* ── Summary bar ── */
+  .sev-bar { display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px; }
+  .sev-tile {
+    flex:1;min-width:100px;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radius-sm);padding:14px 16px;text-align:center;
+  }
+  .sev-tile .tile-lbl { font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px; }
+  .sev-tile .tile-val { font-size:24px;font-weight:700;margin-top:4px; }
+
+  /* ── Sub tabs ── */
+  .subtabs { display:flex;gap:2px;margin-bottom:16px; }
+  .subtab { padding:8px 16px;font-size:12px;font-weight:500;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:6px;cursor:pointer; }
+  .subtab.active { background:#1e2040;border-color:var(--accent);color:var(--accent2); }
+
+  /* ── Data table ── */
+  .data-table { width:100%;border-collapse:collapse;font-size:12px; }
+  .data-table th { padding:8px 12px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);text-align:left;font-weight:600; }
+  .data-table td { padding:9px 12px;border-bottom:1px solid #1e2130;color:var(--text); }
+  .data-table tr:hover td { background:#1a1e2d; }
+  .note-banner { background:#1a1d2e;border:1px solid #2a2e50;border-radius:var(--radius-sm);padding:10px 16px;font-size:12px;color:#94a3b8;margin-bottom:16px; }
+  .note-banner strong { color:var(--accent2); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo-ring">APO</div>
+  <div>
+    <div style="font-size:15px;font-weight:600">AI-Policy Optimizer <span style="color:var(--muted);font-weight:400">(APO)</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:1px">AI-Powered Policy Automation · FortiGate</div>
+  </div>
+  <div class="badge-preview">UI Preview</div>
+</div>
+
+<nav class="nav">
+  <div class="nav-tab">Policy Analysis</div>
+  <div class="nav-tab">Config Change Review</div>
+  <div class="nav-tab active">Severity Results</div>
+  <div class="nav-tab">Remediation</div>
+  <div class="nav-tab">Version Advisor</div>
+</nav>
+
+<div class="main">
+  <div class="note-banner"><strong>Design Preview Only.</strong> Static mockup — no functionality.</div>
+
+  <!-- Criteria guide -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-index">Guide</div>
+        <div class="card-title">Severity Classification Criteria</div>
+      </div>
+    </div>
+    <table class="sev-guide">
+      <thead><tr><th>Sev</th><th>Risk</th><th>Action</th><th>Classification Criteria</th></tr></thead>
+      <tbody>
+        <tr><td><span class="sev-badge s7">7</span></td><td><span class="risk-pill r-none">None</span></td><td>Keep</td><td>Deny / ICMP-only / Valid ITS ticket / "controlled" name / ADMIN or MGMT in name</td></tr>
+        <tr><td><span class="sev-badge s1">1</span></td><td><span class="risk-pill r-critical">Critical</span></td><td>Disable Immediately</td><td>All Any/All · Hit=0 or unused ≥1yr · Risky service only · TEMP + no ITS + Hit=0</td></tr>
+        <tr><td><span class="sev-badge s2">2</span></td><td><span class="risk-pill r-high">High</span></td><td>Delete Required</td><td>Status=Disabled · Expired schedule · Hit=0 + Accept + registered ≥1yr</td></tr>
+        <tr><td><span class="sev-badge s3">3</span></td><td><span class="risk-pill r-medium">Medium</span></td><td>Additional Review</td><td>Server–User registered >1yr, low hits, last used ≥1yr · Risky mix + active</td></tr>
+        <tr><td><span class="sev-badge s4">4</span></td><td><span class="risk-pill r-medium">Medium</span></td><td>Additional Review</td><td>Server–Server registered >2yr + hits&lt;50 · Any/All + active + S–S</td></tr>
+        <tr><td><span class="sev-badge s5">5</span></td><td><span class="risk-pill r-low">Low</span></td><td>Request ITS Ticket</td><td>Server–User &lt;1yr + no RITM · Active but no formal registration</td></tr>
+        <tr><td><span class="sev-badge s6">6</span></td><td><span class="risk-pill r-low">Low</span></td><td>Request ITS Ticket</td><td>AD/DNS/LDAP + Hit>0 · S–S within 2yr + no RITM · Infrastructure object</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- IP Range -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-index">Step 1</div>
+        <div class="card-title">User IP Range Configuration</div>
+      </div>
+      <button class="btn-primary" style="margin-left:auto">Classify</button>
+    </div>
+    <div class="range-row">
+      <input class="range-input" placeholder="CIDR (e.g. 10.99.240.0/21)" />
+      <button class="btn-secondary">Add</button>
+      <button class="btn-secondary">Import from File</button>
+    </div>
+    <div class="tag-list">
+      <span class="tag">10.99.240.0/21</span>
+      <span class="tag">172.16.10.0/24</span>
+      <span class="tag">192.168.100.0/24</span>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:var(--muted)">3 ranges configured · Severity 1/2/7 can be assessed without IP ranges.</div>
+  </div>
+
+  <!-- Results summary -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-index">Results</div>
+        <div class="card-title">Severity Classification Results</div>
+      </div>
+      <button class="btn-secondary" style="margin-left:auto">Export to Excel</button>
+    </div>
+    <div class="sev-bar">
+      <div class="sev-tile" style="border-color:#3b1212"><div class="tile-lbl">Critical (S1)</div><div class="tile-val" style="color:var(--c1)">8</div></div>
+      <div class="sev-tile" style="border-color:#2d1a0a"><div class="tile-lbl">High (S2)</div><div class="tile-val" style="color:var(--c2)">15</div></div>
+      <div class="sev-tile" style="border-color:#2d2508"><div class="tile-lbl">Medium (S3)</div><div class="tile-val" style="color:var(--c3)">22</div></div>
+      <div class="sev-tile" style="border-color:#1e1a35"><div class="tile-lbl">Medium (S4)</div><div class="tile-val" style="color:var(--c4)">31</div></div>
+      <div class="sev-tile" style="border-color:#1a2035"><div class="tile-lbl">Low (S5)</div><div class="tile-val" style="color:var(--c5)">19</div></div>
+      <div class="sev-tile" style="border-color:#0f2a22"><div class="tile-lbl">Low (S6)</div><div class="tile-val" style="color:var(--c6)">47</div></div>
+      <div class="sev-tile" style="border-color:#1e2028"><div class="tile-lbl">None (S7)</div><div class="tile-val" style="color:var(--c7)">142</div></div>
+    </div>
+
+    <div class="subtabs">
+      <div class="subtab active">Firewall Policy</div>
+      <div class="subtab">Proxy Policy</div>
+    </div>
+
+    <table class="data-table">
+      <thead><tr><th>Sev</th><th>ID</th><th>Name</th><th>Risk</th><th>Src</th><th>Dst</th><th>Service</th><th>Hit Count</th><th>Last Used</th><th>Reason</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="sev-badge s1">1</span></td><td>45</td><td>TEMP_All_Access</td>
+          <td><span class="risk-pill r-critical">Critical</span></td>
+          <td>any</td><td>any</td><td>ALL</td><td>0</td><td>Never</td>
+          <td style="font-size:11px;color:var(--muted)">Source+Dest+Service = All · Hit=0</td>
+        </tr>
+        <tr>
+          <td><span class="sev-badge s1">1</span></td><td>88</td><td>Legacy_Telnet</td>
+          <td><span class="risk-pill r-critical">Critical</span></td>
+          <td>10.99.240.0/21</td><td>SRV-01</td><td>TELNET</td><td>0</td><td>Never</td>
+          <td style="font-size:11px;color:var(--muted)">Risky service (TELNET) · Hit=0</td>
+        </tr>
+        <tr>
+          <td><span class="sev-badge s2">2</span></td><td>112</td><td>Old_Backup_Rule</td>
+          <td><span class="risk-pill r-high">High</span></td>
+          <td>SRV-BK-01</td><td>SRV-BK-02</td><td>FTP</td><td>—</td><td>—</td>
+          <td style="font-size:11px;color:var(--muted)">Status = Disabled</td>
+        </tr>
+        <tr>
+          <td><span class="sev-badge s2">2</span></td><td>67</td><td>Expired_Proj_Rule</td>
+          <td><span class="risk-pill r-high">High</span></td>
+          <td>192.168.1.0/24</td><td>DMZ_NET</td><td>HTTP</td><td>0</td><td>2023-05-22</td>
+          <td style="font-size:11px;color:var(--muted)">Schedule expired (230601)</td>
+        </tr>
+        <tr>
+          <td><span class="sev-badge s3">3</span></td><td>201</td><td>User_to_DB_Legacy</td>
+          <td><span class="risk-pill r-medium">Medium</span></td>
+          <td>USER_NET</td><td>DB_SRV</td><td>MYSQL</td><td>12</td><td>2024-11-01</td>
+          <td style="font-size:11px;color:var(--muted)">S–U registered >1yr · Last used ≥1yr</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>

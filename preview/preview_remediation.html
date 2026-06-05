@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>APO UI Preview — Remediation</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --card: #1e2130; --border: #2a2e42;
+    --accent: #6366f1; --accent2: #818cf8;
+    --red: #ef4444; --orange: #f97316; --green: #22c55e; --yellow: #eab308;
+    --text: #e2e8f0; --muted: #94a3b8; --faint: #475569;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; font-size:14px; }
+  .header { background:#1a1d27;border-bottom:1px solid var(--border);padding:0 32px;display:flex;align-items:center;gap:16px;height:60px; }
+  .logo-ring { width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#4f46e5);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#fff; }
+  .nav { background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:2px; }
+  .nav-tab { padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent; }
+  .nav-tab.active { color:var(--accent2);border-bottom-color:var(--accent); }
+  .badge-preview { margin-left:auto;background:var(--accent);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600; }
+  .main { max-width:1280px;margin:0 auto;padding:28px 32px; }
+  .card { background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;margin-bottom:20px; }
+  .card-header { display:flex;align-items:center;gap:12px;margin-bottom:16px; }
+  .card-index { font-size:10px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.8px; }
+  .card-title { font-size:16px;font-weight:600; }
+  .btn-primary { background:var(--accent);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap; }
+  .btn-secondary { background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap; }
+  .btn-danger { background:#7f1d1d;color:#fca5a5;border:1px solid #991b1b;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap; }
+  .btn-danger:disabled { opacity:.4; }
+
+  /* Device form */
+  .device-form { display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end; }
+  .form-field { display:flex;flex-direction:column;gap:4px; }
+  .form-label { font-size:11px;color:var(--muted);font-weight:500; }
+  .form-input { background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px; }
+  .form-input-sm { width:80px; }
+  .form-input-lg { width:220px; }
+  .status-ok  { color:var(--green);font-size:12px;margin-top:8px; }
+  .status-msg { font-size:12px;color:var(--muted); }
+
+  /* Toolbar */
+  .toolbar { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
+  .toolbar-spacer { flex:1; }
+
+  /* Section header */
+  .section-hdr { display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:12px; }
+  .section-label-red  { font-size:12px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.5px; }
+  .section-label-gray { font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px; }
+  .section-count { background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 8px;font-size:11px;font-weight:700; }
+  .selected-count { font-size:12px;color:var(--muted); }
+  .check-all { font-size:11px;color:var(--muted);margin-left:auto;display:flex;align-items:center;gap:5px;cursor:pointer; }
+
+  /* Table */
+  .rem-table { width:100%;border-collapse:collapse;font-size:12px; }
+  .rem-table th { padding:8px 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);text-align:left;font-weight:600; }
+  .rem-table td { padding:9px 10px;border-bottom:1px solid #1e2130;vertical-align:middle; }
+  .rem-table tr:hover td { background:#1a1e2d; }
+  .risk-pill { display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700; }
+  .risk-critical { background:#3b1212;color:var(--red); }
+  .risk-high     { background:#2d1a0a;color:var(--orange); }
+  .td-muted { color:var(--muted);font-size:11px; }
+  .td-reason { color:#94a3b8;font-size:11px;max-width:240px; }
+
+  .note-banner { background:#1a1d2e;border:1px solid #2a2e50;border-radius:var(--radius-sm);padding:10px 16px;font-size:12px;color:#94a3b8;margin-bottom:16px; }
+  .note-banner strong { color:var(--accent2); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo-ring">APO</div>
+  <div>
+    <div style="font-size:15px;font-weight:600">AI-Policy Optimizer</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:1px">AI-Powered Policy Automation · FortiGate</div>
+  </div>
+  <div class="badge-preview">UI Preview</div>
+</div>
+
+<nav class="nav">
+  <div class="nav-tab">Policy Analysis</div>
+  <div class="nav-tab">Config Change Review</div>
+  <div class="nav-tab">Severity Results</div>
+  <div class="nav-tab active">Remediation</div>
+  <div class="nav-tab">Version Advisor</div>
+</nav>
+
+<div class="main">
+  <div class="note-banner"><strong>Design Preview Only.</strong> Proposed redesign — no functionality.</div>
+
+  <!-- Step 1 — Device -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-index">Step 1</div>
+        <div class="card-title">FortiGate Device Registration</div>
+      </div>
+      <span style="margin-left:auto;font-size:12px" class="status-ok">✓ Connected — FortiGate-1000D (v7.2.4)  |  Your IP → FortiGate: 10.99.242.233</span>
+    </div>
+    <div class="device-form">
+      <div class="form-field">
+        <div class="form-label">IP Address</div>
+        <input class="form-input" value="192.168.1.1" />
+      </div>
+      <div class="form-field">
+        <div class="form-label">Port</div>
+        <input class="form-input form-input-sm" value="443" />
+      </div>
+      <div class="form-field">
+        <div class="form-label">VDOM</div>
+        <input class="form-input form-input-sm" value="root" />
+      </div>
+      <div class="form-field">
+        <div class="form-label">API Token</div>
+        <input class="form-input form-input-lg" type="password" value="••••••••••••••••" />
+      </div>
+      <div class="form-field" style="justify-content:flex-end">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);cursor:pointer"><input type="checkbox" checked> Skip SSL Verify</label>
+      </div>
+      <button class="btn-primary">Save Device</button>
+      <button class="btn-secondary">Test Connection</button>
+    </div>
+  </div>
+
+  <!-- Step 2 — Candidates -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-index">Step 2</div>
+        <div class="card-title">Disable Candidates</div>
+      </div>
+      <div class="toolbar" style="margin-left:auto">
+        <button class="btn-primary">Load Candidates</button>
+        <button class="btn-secondary">Export CSV</button>
+        <button class="btn-secondary">Export JSON</button>
+        <button class="btn-danger">Apply Disable to Selected</button>
+      </div>
+    </div>
+
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px">
+      Total Critical/High: 6  |  Active (to disable): 4  |  Already disabled: 2
+    </div>
+
+    <!-- Disable Candidates section -->
+    <div class="section-hdr">
+      <span class="section-label-red">Disable Candidates</span>
+      <span class="section-count">(4)</span>
+      <span class="selected-count">2 / 4 selected</span>
+      <label class="check-all"><input type="checkbox"> Select All</label>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table class="rem-table">
+        <thead><tr>
+          <th style="width:36px"></th>
+          <th>ID</th><th>Name</th><th>Risk</th>
+          <th>Source IP</th><th>Destination IP</th><th>Service</th><th>Schedule</th><th>Reason</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><input type="checkbox" checked></td>
+            <td>45</td><td>TEMP_All_Access</td>
+            <td><span class="risk-pill risk-critical">Critical</span></td>
+            <td class="td-muted">any</td><td class="td-muted">any</td><td class="td-muted">ALL</td><td class="td-muted">always</td>
+            <td class="td-reason">Source + Dest + Service = All · Hit Count = 0</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox" checked></td>
+            <td>88</td><td>Legacy_Telnet_Admin</td>
+            <td><span class="risk-pill risk-critical">Critical</span></td>
+            <td class="td-muted">10.99.240.0/21</td><td class="td-muted">SRV-01</td><td class="td-muted">TELNET</td><td class="td-muted">always</td>
+            <td class="td-reason">Risky service (TELNET) · Hit Count = 0</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td>112</td><td>FTP_External</td>
+            <td><span class="risk-pill risk-critical">Critical</span></td>
+            <td class="td-muted">any</td><td class="td-muted">EXT_SERVER</td><td class="td-muted">FTP</td><td class="td-muted">always</td>
+            <td class="td-reason">Risky service only (FTP) · Last used ≥ 1 year</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td>201</td><td>Expired_Project_Q1</td>
+            <td><span class="risk-pill risk-high">High</span></td>
+            <td class="td-muted">192.168.1.0/24</td><td class="td-muted">DMZ_NET</td><td class="td-muted">HTTP,HTTPS</td><td class="td-muted">230401</td>
+            <td class="td-reason">Schedule expired (230401)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Already Disabled section -->
+    <div class="section-hdr" style="margin-top:28px">
+      <span class="section-label-gray">Already Disabled</span>
+      <span class="section-count">(2)</span>
+      <span style="font-size:12px;color:var(--faint);margin-left:8px">Already inactive in config — no API action needed</span>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table class="rem-table">
+        <thead><tr>
+          <th>ID</th><th>Name</th><th>Risk</th>
+          <th>Source IP</th><th>Destination IP</th><th>Service</th><th>Schedule</th><th>Reason</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td>67</td><td>Old_Backup_Rule</td>
+            <td><span class="risk-pill risk-high">High</span></td>
+            <td class="td-muted">SRV-BK-01</td><td class="td-muted">SRV-BK-02</td><td class="td-muted">FTP</td><td class="td-muted">always</td>
+            <td class="td-reason">Status = Disabled</td>
+          </tr>
+          <tr>
+            <td>155</td><td>TEMP_Dev_Bypass</td>
+            <td><span class="risk-pill risk-critical">Critical</span></td>
+            <td class="td-muted">DEV_NET</td><td class="td-muted">any</td><td class="td-muted">ALL</td><td class="td-muted">always</td>
+            <td class="td-reason">Source + Dest + Service = All · Status = Disabled</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

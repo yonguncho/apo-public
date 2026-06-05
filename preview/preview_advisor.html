@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>APO UI Preview — Version Advisor</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --card: #1e2130; --border: #2a2e42;
+    --accent: #6366f1; --accent2: #818cf8;
+    --red: #ef4444; --orange: #f97316; --yellow: #eab308; --green: #22c55e; --blue: #60a5fa;
+    --text: #e2e8f0; --muted: #94a3b8; --faint: #475569;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+  .header { background:#1a1d27;border-bottom:1px solid var(--border);padding:0 32px;display:flex;align-items:center;gap:16px;height:60px; }
+  .logo-ring { width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#4f46e5);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#fff; }
+  .nav { background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:2px; }
+  .nav-tab { padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent; }
+  .nav-tab.active { color:var(--accent2);border-bottom-color:var(--accent); }
+  .badge-preview { margin-left:auto;background:var(--accent);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600; }
+  .main { max-width:1280px;margin:0 auto;padding:28px 32px; }
+  .card { background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;margin-bottom:20px; }
+  .card-header { display:flex;align-items:center;gap:12px;margin-bottom:16px; }
+  .card-index { font-size:10px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.8px; }
+  .card-title { font-size:16px;font-weight:600; }
+  .btn-primary { background:var(--accent);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer; }
+  .btn-secondary { background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer; }
+
+  /* ── Version stat tiles ── */
+  .stat-row { display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px; }
+  .stat-tile { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px; }
+  .st-lbl { font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px; }
+  .st-val { font-size:20px;font-weight:700;margin-top:4px; }
+
+  /* ── Feature tags ── */
+  .feat-row { display:flex;flex-wrap:wrap;gap:6px;margin-top:12px; }
+  .feat-tag { background:#1e2240;border:1px solid #3a3f6e;border-radius:4px;padding:3px 10px;font-size:11px;color:var(--accent2); }
+  .feat-label { font-size:11px;color:var(--muted);margin-right:4px; }
+
+  /* ── Summary bar ── */
+  .adv-bar { display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap; }
+  .adv-tile { flex:1;min-width:140px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;text-align:center; }
+  .adv-tile.danger { border-color:#3b1212;background:#1a0f0f; }
+  .adv-tile.warn   { border-color:#2d2508;background:#1a1600; }
+  .adv-tile .t-lbl { font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px; }
+  .adv-tile .t-val { font-size:26px;font-weight:700;margin-top:4px; }
+  .adv-tile.danger .t-val { color:var(--red); }
+  .adv-tile.warn   .t-val { color:var(--yellow); }
+
+  /* ── Section header ── */
+  .section-hdr { display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px; }
+  .section-hdr-title { font-size:14px;font-weight:600; }
+  .section-count { background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 8px;font-size:11px;font-weight:700;color:var(--text); }
+
+  /* ── CVE table ── */
+  .cve-table { width:100%;border-collapse:collapse;font-size:12px; }
+  .cve-table th { padding:7px 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);text-align:left;font-weight:600; }
+  .cve-table td { padding:9px 10px;border-bottom:1px solid #1e2130;vertical-align:middle; }
+  .cve-table tr:hover td { background:#1a1e2d; }
+
+  .sev-dot { display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;flex-shrink:0; }
+  .sev-pill { display:inline-flex;align-items:center;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700; }
+  .sev-Critical { background:#3b1212;color:var(--red); }
+  .sev-High     { background:#2d1a0a;color:var(--orange); }
+  .sev-Medium   { background:#2d2508;color:var(--yellow); }
+  .sev-Low      { background:#0f2a22;color:var(--green); }
+
+  .fix-pill { background:#1e2240;border:1px solid var(--accent);border-radius:4px;padding:2px 8px;font-size:11px;color:var(--accent2);font-weight:600; }
+  .wka-pill { background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:10px;color:var(--muted); }
+
+  /* ── Bug table ── */
+  .bug-table { width:100%;border-collapse:collapse;font-size:12px; }
+  .bug-table th { padding:7px 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);text-align:left;font-weight:600; }
+  .bug-table td { padding:9px 10px;border-bottom:1px solid #1e2130; }
+  .bug-table tr:hover td { background:#1a1e2d; }
+
+  /* ── Fix version group ── */
+  .fix-version-group { margin-bottom:16px; }
+  .fix-version-label { font-size:12px;font-weight:700;color:var(--accent2);background:#1e2040;border:1px solid var(--accent);border-radius:4px;display:inline-block;padding:3px 10px;margin-bottom:8px; }
+
+  .note-banner { background:#1a1d2e;border:1px solid #2a2e50;border-radius:var(--radius-sm);padding:10px 16px;font-size:12px;color:#94a3b8;margin-bottom:16px; }
+  .note-banner strong { color:var(--accent2); }
+  .filter-note { font-size:11px;color:var(--muted);background:#161a2a;border:1px solid #252840;border-radius:4px;padding:6px 12px;margin-bottom:12px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo-ring">APO</div>
+  <div>
+    <div style="font-size:15px;font-weight:600">AI-Policy Optimizer</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:1px">AI-Powered Policy Automation · FortiGate</div>
+  </div>
+  <div class="badge-preview">UI Preview</div>
+</div>
+
+<nav class="nav">
+  <div class="nav-tab">Policy Analysis</div>
+  <div class="nav-tab">Config Change Review</div>
+  <div class="nav-tab">Severity Results</div>
+  <div class="nav-tab">Remediation</div>
+  <div class="nav-tab active">Version Advisor</div>
+</nav>
+
+<div class="main">
+  <div class="note-banner"><strong>Design Preview Only.</strong> Proposed redesign — no functionality. Demonstrates: ① no Patched CVEs section ② config-filtered Known Issues ③ policy-applied filtering for Fixes.</div>
+
+  <!-- Version detection -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-index">Detection</div>
+        <div class="card-title">Version Detection</div>
+      </div>
+      <button class="btn-primary" style="margin-left:auto">Analyze</button>
+    </div>
+    <div class="stat-row">
+      <div class="stat-tile"><div class="st-lbl">Model</div><div class="st-val" style="font-size:16px">FortiGate 1000D</div></div>
+      <div class="stat-tile"><div class="st-lbl">Branch</div><div class="st-val" style="font-size:16px">FortiOS 7.2</div></div>
+      <div class="stat-tile"><div class="st-lbl">Version</div><div class="st-val" style="font-size:16px">7.2.4</div></div>
+      <div class="stat-tile"><div class="st-lbl">Build</div><div class="st-val" style="font-size:16px">1396</div></div>
+    </div>
+    <div class="feat-row">
+      <span class="feat-label">Detected Features</span>
+      <span class="feat-tag">SSL VPN</span>
+      <span class="feat-tag">IPsec VPN</span>
+      <span class="feat-tag">HA</span>
+      <span class="feat-tag">Web Filter</span>
+      <span class="feat-tag">IPS</span>
+      <span class="feat-tag">Antivirus</span>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--muted)">Results are filtered to features detected in your config. Items unrelated to your deployment are excluded.</div>
+  </div>
+
+  <!-- Result card -->
+  <div class="card">
+
+    <!-- Summary bar (Patched CVEs tile removed) -->
+    <div class="adv-bar">
+      <div class="adv-tile danger">
+        <div class="t-lbl">Active CVEs</div>
+        <div class="t-val">3</div>
+      </div>
+      <div class="adv-tile warn">
+        <div class="t-lbl">Known Issues</div>
+        <div class="t-val">7</div>
+      </div>
+      <div class="adv-tile">
+        <div class="t-lbl">Fix Versions Available</div>
+        <div class="t-val" style="color:var(--blue)">12</div>
+      </div>
+    </div>
+
+    <!-- Active CVEs -->
+    <div class="section-hdr">
+      <span style="font-size:16px">🔴</span>
+      <span class="section-hdr-title">Active CVEs</span>
+      <span class="section-count">3</span>
+    </div>
+    <table class="cve-table" style="margin-bottom:28px">
+      <thead><tr><th>Severity</th><th>Advisory</th><th>CVE</th><th>Title</th><th>Affected Range</th><th>Fix Version</th><th>Workaround</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="sev-pill sev-Critical">Critical</span></td>
+          <td style="font-size:11px;white-space:nowrap">FG-IR-24-015</td>
+          <td style="font-size:11px;white-space:nowrap">CVE-2024-21762</td>
+          <td>FortiOS — out-of-bounds write in SSL-VPN</td>
+          <td style="font-size:11px">7.2.0 through 7.2.5</td>
+          <td><span class="fix-pill">7.2.6</span></td>
+          <td><span class="wka-pill">Disable SSL-VPN</span></td>
+        </tr>
+        <tr>
+          <td><span class="sev-pill sev-High">High</span></td>
+          <td style="font-size:11px;white-space:nowrap">FG-IR-23-385</td>
+          <td style="font-size:11px;white-space:nowrap">CVE-2023-44250</td>
+          <td>FortiOS — improper privilege management in HA</td>
+          <td style="font-size:11px">7.2.0 through 7.2.3</td>
+          <td><span class="fix-pill">7.2.4</span></td>
+          <td><span class="wka-pill">—</span></td>
+        </tr>
+        <tr>
+          <td><span class="sev-pill sev-Medium">Medium</span></td>
+          <td style="font-size:11px;white-space:nowrap">FG-IR-23-106</td>
+          <td style="font-size:11px;white-space:nowrap">CVE-2023-27997</td>
+          <td>FortiOS — heap-based buffer overflow in SSL-VPN</td>
+          <td style="font-size:11px">7.2.0 through 7.2.4</td>
+          <td><span class="fix-pill">7.2.5</span></td>
+          <td><span class="wka-pill">Disable SSL-VPN</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Fixes in newer versions -->
+    <div class="section-hdr">
+      <span style="font-size:16px">🔧</span>
+      <span class="section-hdr-title">Fixes Available in Newer Versions</span>
+      <span class="section-count">12</span>
+    </div>
+    <div class="filter-note">ℹ Filtered to features active in your config AND applied to at least one firewall policy. Profile-type features (Antivirus, IPS, Web Filter, App Control, DNS Filter) are only shown if the profile is bound to a policy — not just configured.</div>
+
+    <div class="fix-version-group">
+      <div class="fix-version-label">Fixes in 7.2.5</div>
+      <table class="bug-table">
+        <thead><tr><th>Bug ID</th><th>Component</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td style="font-weight:700;white-space:nowrap">932451</td><td style="color:var(--muted);white-space:nowrap">SSL VPN</td><td>SSL-VPN disconnects intermittently under high concurrent session load</td></tr>
+          <tr><td style="font-weight:700;white-space:nowrap">938872</td><td style="color:var(--muted);white-space:nowrap">IPS</td><td>IPS engine may restart when processing fragmented TCP payloads with custom signatures</td></tr>
+          <tr><td style="font-weight:700;white-space:nowrap">941200</td><td style="color:var(--muted);white-space:nowrap">HA</td><td>HA failover takes longer than expected when traffic load exceeds 80%</td></tr>
+          <tr><td style="font-weight:700;white-space:nowrap">944018</td><td style="color:var(--muted);white-space:nowrap">System</td><td>Memory leak in daemon when SNMP polling interval is below 30 seconds</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="fix-version-group">
+      <div class="fix-version-label">Fixes in 7.2.6</div>
+      <table class="bug-table">
+        <thead><tr><th>Bug ID</th><th>Component</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td style="font-weight:700;white-space:nowrap">951003</td><td style="color:var(--muted);white-space:nowrap">SSL VPN</td><td>Tunnel mode users may fail authentication after firmware upgrade from 7.0.x</td></tr>
+          <tr><td style="font-weight:700;white-space:nowrap">955211</td><td style="color:var(--muted);white-space:nowrap">Web Filter</td><td>Web filter rating errors occur when FortiGuard connection is interrupted mid-session</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Known Issues (filtered, capped) -->
+    <div class="section-hdr" style="margin-top:12px">
+      <span style="font-size:16px">⚠️</span>
+      <span class="section-hdr-title">Known Issues in Current Version</span>
+      <span class="section-count">7</span>
+    </div>
+    <div class="filter-note">ℹ Showing issues related to features detected in your config. General system issues are capped at 10 entries.</div>
+    <table class="bug-table">
+      <thead><tr><th>Bug ID</th><th>Component</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td style="font-weight:700;white-space:nowrap">918241</td><td style="color:var(--muted);white-space:nowrap">SSL VPN</td><td>Bookmarks may not render correctly in SSL-VPN web mode for some web applications</td></tr>
+        <tr><td style="font-weight:700;white-space:nowrap">919556</td><td style="color:var(--muted);white-space:nowrap">IPsec VPN</td><td>Phase 2 auto-negotiation fails when dead-peer-detection is set to aggressive mode</td></tr>
+        <tr><td style="font-weight:700;white-space:nowrap">921002</td><td style="color:var(--muted);white-space:nowrap">HA</td><td>Heartbeat loss false positives may occur when HA heartbeat interface is on a LAG</td></tr>
+        <tr><td style="font-weight:700;white-space:nowrap">922810</td><td style="color:var(--muted);white-space:nowrap">IPS</td><td>IPS anomaly detection may generate false positives for certain UDP-based VoIP traffic</td></tr>
+        <tr><td style="font-weight:700;white-space:nowrap">924100</td><td style="color:var(--muted);white-space:nowrap">System</td><td>CPU usage spike may occur during FortiGuard signature update download</td></tr>
+        <tr><td style="font-weight:700;white-space:nowrap">925030</td><td style="color:var(--muted);white-space:nowrap">System</td><td>NTP sync failure on startup when NTP server is behind an asymmetric route</td></tr>
+        <tr><td style="font-weight:700;white-space:nowrap">926150</td><td style="color:var(--muted);white-space:nowrap">GUI</td><td>Policy list page may timeout loading when policy count exceeds 5000</td></tr>
+      </tbody>
+    </table>
+
+  </div>
+</div>
+</body>
+</html>
