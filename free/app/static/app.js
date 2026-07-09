@@ -755,7 +755,7 @@ renderActiveTab();
 
 
 /* APO License Gate & Modal */
-const LEMON_CHECKOUT_URL = 'https://apo-tool.lemonsqueezy.com/buy/apo-export';
+const LEMON_CHECKOUT_URL = 'https://choiceguidelab.lemonsqueezy.com/checkout/buy/1c83b59f-7f23-4899-a173-dc43d1c7bce6';
 
 let _licensed = null;  // null=미확인, true/false
 
