@@ -4,7 +4,11 @@ __pycache__/
 .env
 dist/
 build/
+dist_tmp/
 *.spec
 app/__pycache__/
 app/**/__pycache__/
 *.egg-info/
+
+# 배포 바이너리는 GitHub Releases로만 배포한다 (git에 커밋하지 않는다)
+*.exe
