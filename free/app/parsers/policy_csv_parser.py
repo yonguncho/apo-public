@@ -2,8 +2,19 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import re
 from typing import Any
+
+# csv 모듈 기본 필드 상한(131072)을 넘으면 _csv.Error로 죽는다. FortiGate GUI가
+# 아주 긴 주소/서비스 목록을 한 셀에 넣는 경우가 있어 상한을 넉넉히 올린다.
+# sys.maxsize를 그대로 쓰면 방어가 사라지므로 유한한 값으로 둔다.
+_CSV_FIELD_LIMIT = 8 * 1024 * 1024
+try:
+    if csv.field_size_limit() < _CSV_FIELD_LIMIT:
+        csv.field_size_limit(_CSV_FIELD_LIMIT)
+except (OverflowError, ValueError):
+    pass
 
 
 class PolicyStatsCsvParser:
@@ -24,14 +35,30 @@ class PolicyStatsCsvParser:
 
         text = text.lstrip("\ufeff")
         delimiter = self._sniff_delimiter(text)
-        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-        if not reader.fieldnames:
+        # newline="" \uc744 \uc8fc\uc9c0 \uc54a\uc73c\uba74 StringIO\uac00 \uac1c\ud589\uc744 \ubcc0\ud658\ud574, \uad6c\ud615 Mac \uc2a4\ud0c0\uc77c\uc758
+        # \ub2e8\ub3c5 \r \uac1c\ud589 CSV\uc5d0\uc11c csv \ubaa8\ub4c8\uc774 "new-line character seen in unquoted
+        # field" \ub85c \uc8fd\ub294\ub2e4. \uc2e4\uc81c GUI \ub0b4\ubcf4\ub0b4\uae30\uc5d0\uc11c \ub098\uc62c \uc218 \uc788\ub294 \ud615\ud0dc\ub2e4.
+        reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
+        try:
+            fieldnames = reader.fieldnames
+        except csv.Error:
+            return {}
+        if not fieldnames:
             return {}
 
-        header_map = self._build_header_map(reader.fieldnames)
+        header_map = self._build_header_map(fieldnames)
         result: dict[str, dict[str, Any]] = {}
 
-        for row in reader:
+        # 기형 행 하나 때문에 전체 임포트가 실패하지 않도록, 반복 자체를 감싼다.
+        row_iter = iter(reader)
+        while True:
+            try:
+                row = next(row_iter)
+            except StopIteration:
+                break
+            except csv.Error:
+                continue
+
             policy_id = self._extract_policy_id(row, header_map)
             if not policy_id:
                 continue
@@ -79,8 +106,15 @@ class PolicyStatsCsvParser:
             return 0
         raw = raw.replace(",", "")
         try:
-            return int(float(raw))
-        except ValueError:
+            value = float(raw)
+        except (ValueError, OverflowError):
+            return 0
+        # float("1e400") -> inf, int(inf) -> OverflowError. nan도 마찬가지.
+        if not math.isfinite(value):
+            return 0
+        try:
+            return int(value)
+        except (ValueError, OverflowError):
             return 0
 
     def _extract_last_used(self, row: dict[str, Any], header_map: dict[str, str]) -> str:

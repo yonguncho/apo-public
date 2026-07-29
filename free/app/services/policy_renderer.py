@@ -263,53 +263,82 @@ def _resolve_interface(port_name: str, interface_map: dict[str, dict[str, Any]])
     return info.get("display_name") or port_name
 
 
+def _resolve_grouped_object(
+    name: str,
+    leaf_map: dict[str, dict[str, Any]],
+    group_map: dict[str, dict[str, Any]],
+    render_leaf,
+    memo: dict[str, list[str]] | None = None,
+) -> list[str]:
+    """중첩 그룹을 전개한다. 반복(iterative) + 메모이제이션.
+
+    이전 구현은 재귀 호출마다 visited 집합을 copy()해서 넘겼다. 순환은 막았지만
+    같은 그룹이 서로 다른 경로로 도달하면 매번 다시 전개돼, 각 그룹이 다음
+    그룹을 두 번씩 참조하는 설정에서 2^depth로 폭발했다(888바이트 설정 파일로
+    27초, 깊이 30이면 수 시간). 또 깊이만큼 파이썬 프레임을 써서 1500단
+    중첩이면 RecursionError로 죽었다.
+
+    여기서는 그룹당 한 번만 전개해 결과를 memo에 담고, 스택을 명시적으로
+    관리해 재귀 깊이 제한도 받지 않는다.
+    """
+    if memo is None:
+        memo = {}
+
+    # (노드, 자식 처리 완료 여부) 스택. resolving은 현재 경로 = 순환 감지용.
+    stack: list[tuple[str, bool]] = [(name, False)]
+    resolving: set[str] = set()
+
+    while stack:
+        node, expanded = stack.pop()
+
+        if expanded:
+            # 자식들이 모두 memo에 들어온 뒤 합친다.
+            members = group_map[node].get("member", [])
+            out: list[str] = []
+            for m in members:
+                out.extend(memo.get(m, [m]))
+            memo[node] = _dedupe(out)
+            resolving.discard(node)
+            continue
+
+        if node in memo:
+            continue
+        if node in resolving:
+            # 현재 전개 경로에 다시 등장 = 순환
+            memo[node] = [f"[CYCLE:{node}]"]
+            continue
+        if node in leaf_map:
+            memo[node] = [render_leaf(leaf_map[node])]
+            continue
+        if node not in group_map:
+            memo[node] = [node]
+            continue
+
+        resolving.add(node)
+        stack.append((node, True))
+        for member in group_map[node].get("member", []):
+            if member not in memo:
+                stack.append((member, False))
+
+    return memo.get(name, [name])
+
+
 def _resolve_address_object(
     name: str,
     address_map: dict[str, dict[str, Any]],
     addrgrp_map: dict[str, dict[str, Any]],
-    visited: set[str] | None = None,
+    memo: dict[str, list[str]] | None = None,
 ) -> list[str]:
-    if visited is None:
-        visited = set()
-
-    if name in visited:
-        return [f"[CYCLE:{name}]"]
-    visited.add(name)
-
-    if name in address_map:
-        return [_render_address(address_map[name])]
-
-    if name in addrgrp_map:
-        results: list[str] = []
-        for member in addrgrp_map[name].get("member", []):
-            results.extend(_resolve_address_object(member, address_map, addrgrp_map, visited.copy()))
-        return _dedupe(results)
-
-    return [name]
+    return _resolve_grouped_object(name, address_map, addrgrp_map, _render_address, memo)
 
 
 def _resolve_service_object(
     name: str,
     service_custom_map: dict[str, dict[str, Any]],
     service_group_map: dict[str, dict[str, Any]],
-    visited: set[str] | None = None,
+    memo: dict[str, list[str]] | None = None,
 ) -> list[str]:
-    if visited is None:
-        visited = set()
-    if name in visited:
-        return [f"[CYCLE:{name}]"]
-    visited.add(name)
-
-    if name in service_custom_map:
-        return [_render_service(service_custom_map[name])]
-
-    if name in service_group_map:
-        results: list[str] = []
-        for member in service_group_map[name].get("member", []):
-            results.extend(_resolve_service_object(member, service_custom_map, service_group_map, visited.copy()))
-        return _dedupe(results)
-
-    return [name]
+    return _resolve_grouped_object(name, service_custom_map, service_group_map, _render_service, memo)
 
 
 def _render_address(item: dict[str, Any]) -> str:

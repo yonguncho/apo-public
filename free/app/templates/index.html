@@ -348,7 +348,7 @@
           <label class="rem-label">Port<input id="remPort" type="number" class="rem-input rem-input-sm" value="443"></label>
           <label class="rem-label">VDOM<input id="remVdom" type="text" class="rem-input rem-input-sm" placeholder="root" value="root"></label>
           <label class="rem-label">API Token<input id="remToken" type="password" class="rem-input rem-input-lg" placeholder="API access token"></label>
-          <label class="rem-label rem-label-check"><input id="remSkipSsl" type="checkbox" checked> Skip SSL Verify</label>
+          <label class="rem-label rem-label-check" title="Only enable this for a device with a self-signed certificate. While enabled, the API token is sent over a connection that is not authenticated."><input id="remSkipSsl" type="checkbox"> Skip SSL Verify <span class="rem-warn">(insecure)</span></label>
           <div class="rem-device-actions">
             <button id="remSaveBtn" class="primary-btn">Save Device</button>
             <button id="remTestBtn" class="secondary-btn">Test Connection</button>

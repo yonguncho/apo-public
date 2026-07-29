@@ -6,17 +6,56 @@ Postman Collection JSON 및 CSV 내보내기를 담당한다.
 from __future__ import annotations
 import csv
 import io
+import ipaddress
 import json
+import re
 import socket
-import urllib3
 from datetime import date
+from urllib.parse import quote
 
 import requests
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 # urgency 1 = Critical / urgency 2 = High (severity_engine.py 기준)
 _DISABLE_URGENCIES = {1, 2}
+
+# 장비 주소로 허용할 형태: IPv4/IPv6 리터럴 또는 호스트명.
+# 검증 없이 f-string에 넣으면 "real.fw.local@evil.example" 같은 userinfo 형태로
+# 관리자 토큰이 제3의 호스트로 전송된다(표시상으로는 정상 장비처럼 보인다).
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+)
+
+
+def validate_device_address(ip: str) -> str:
+    """장비 주소를 검증해 URL에 넣어도 안전한 형태로 반환한다.
+
+    부적합하면 ValueError. IPv6는 URL에서 대괄호로 감싸야 하므로 그렇게 반환한다.
+    """
+    addr = (ip or "").strip()
+    if not addr:
+        raise ValueError("Device address is required")
+
+    try:
+        parsed = ipaddress.ip_address(addr.strip("[]"))
+        return f"[{parsed}]" if parsed.version == 6 else str(parsed)
+    except ValueError:
+        pass
+
+    if not _HOSTNAME_RE.match(addr):
+        raise ValueError("Device address must be an IP address or hostname")
+    return addr
+
+
+def _device_conn(device: dict) -> tuple:
+    """(host, port, token, verify) 를 검증된 형태로 반환."""
+    host = validate_device_address(device.get("ip", ""))
+    port = int(device.get("port", 443))
+    token = device.get("token", "")
+    # 기본값을 True로 둔다. 방화벽 관리자 토큰이 오가는 채널이라 검증을 끄면
+    # 관리망에 MITM 위치를 잡은 공격자가 토큰을 그대로 가져갈 수 있다.
+    verify = bool(device.get("verify_ssl", True))
+    return host, port, token, verify
 
 
 def get_candidates(parsed: dict, severity_results: dict) -> dict:
@@ -96,10 +135,10 @@ def _get_source_ip(target_ip: str, port: int) -> str:
 
 def test_connection(device: dict) -> dict:
     """FortiGate REST API 연결 테스트. {"ok": bool, "message": str, "source_ip": str} 반환."""
-    ip     = device.get("ip", "")
-    port   = int(device.get("port", 443))
-    token  = device.get("token", "")
-    verify = bool(device.get("verify_ssl", False))
+    try:
+        ip, port, token, verify = _device_conn(device)
+    except ValueError as exc:
+        return {"ok": False, "message": str(exc), "source_ip": None}
 
     source_ip = _get_source_ip(ip, port)
     src_note  = f" | Your IP → FortiGate: {source_ip}" if source_ip and source_ip != "127.0.0.1" else ""
@@ -133,18 +172,27 @@ def disable_policies(device: dict, policies: list[dict]) -> list[dict]:
     선택된 정책 목록을 FortiGate REST API로 비활성화한다.
     각 정책에 대해 {"policy_id", "name", "ok", "message"} 반환.
     """
-    ip     = device.get("ip", "")
-    port   = int(device.get("port", 443))
-    token  = device.get("token", "")
-    verify = bool(device.get("verify_ssl", False))
-    vdom   = device.get("vdom", "root")
+    try:
+        ip, port, token, verify = _device_conn(device)
+    except ValueError as exc:
+        return [{"policy_id": str(p.get("policy_id", "")), "name": p.get("name", ""),
+                 "ok": False, "message": str(exc)} for p in policies]
+    vdom = device.get("vdom", "root")
 
     results: list[dict] = []
     for p in policies:
         pid    = str(p.get("policy_id", ""))
         ptype  = p.get("type", "firewall")
         ep     = "firewall/policy" if ptype == "firewall" else "firewall/proxy-policy"
-        url    = f"https://{ip}:{port}/api/v2/cmdb/{ep}/{pid}?vdom={vdom}"
+        # policy_id는 숫자만 허용한다. 검증 없이 URL에 넣으면 "../../monitor/
+        # system/os/reboot" 같은 값으로 관리자 토큰을 단 채 다른 엔드포인트를
+        # 호출할 수 있다(requests가 경로의 .. 를 정규화해 실제로 도달한다).
+        if not pid.isdigit():
+            results.append({"policy_id": pid, "name": p.get("name", ""),
+                            "ok": False, "message": "Invalid policy id"})
+            continue
+        url = (f"https://{ip}:{port}/api/v2/cmdb/{ep}/{quote(pid, safe='')}"
+               f"?vdom={quote(str(vdom), safe='')}")
         try:
             r = requests.put(
                 url,
@@ -172,9 +220,13 @@ def export_postman(policies: list[dict], device: dict) -> str:
     """Postman Collection v2.1 JSON 문자열 반환."""
     ip    = device.get("ip", "")
     port  = int(device.get("port", 443))
-    token = device.get("token", "")
     vdom  = device.get("vdom", "root")
     today = date.today().isoformat()
+
+    # API 토큰은 파일에 쓰지 않는다. 이 컬렉션은 사용자가 이메일로 주고받거나
+    # 저장소에 커밋하는 일이 잦은데, 평문 토큰이 들어 있으면 방화벽 관리자
+    # 권한이 그대로 유출된다. Postman 변수로 남겨 사용자가 직접 채우게 한다.
+    token_ref = "{{fortigate_token}}"
 
     items = []
     for p in policies:
@@ -190,7 +242,7 @@ def export_postman(policies: list[dict], device: dict) -> str:
             "request": {
                 "method": "PUT",
                 "header": [
-                    {"key": "Authorization", "value": f"Bearer {token}", "type": "text"},
+                    {"key": "Authorization", "value": f"Bearer {token_ref}", "type": "text"},
                     {"key": "Content-Type",  "value": "application/json",  "type": "text"},
                 ],
                 "url": {
@@ -215,12 +267,18 @@ def export_postman(policies: list[dict], device: dict) -> str:
         "info": {
             "name":          f"APO Remediation — Disable Policies ({today})",
             "_postman_id":   f"apo-remediation-{today}",
-            "description":   f"APO가 생성한 정책 비활성화 컬렉션\n대상 장비: {ip}:{port}\n정책 수: {len(policies)}건",
+            "description":   (
+                f"APO가 생성한 정책 비활성화 컬렉션\n"
+                f"대상 장비: {ip}:{port}\n정책 수: {len(policies)}건\n\n"
+                "실행 전 collection variable 'fortigate_token'에 API 토큰을 입력하세요. "
+                "보안상 토큰은 이 파일에 저장하지 않습니다."
+            ),
             "schema":        "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
         },
         "variable": [
-            {"key": "base_url", "value": f"https://{ip}:{port}"},
-            {"key": "vdom",     "value": vdom},
+            {"key": "base_url",        "value": f"https://{ip}:{port}"},
+            {"key": "vdom",            "value": vdom},
+            {"key": "fortigate_token", "value": "", "type": "secret"},
         ],
         "item": items,
     }

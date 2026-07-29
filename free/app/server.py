@@ -178,7 +178,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v65-2026-07-28"
+APO_VERSION = "v66-2026-07-29"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -193,6 +193,18 @@ print(f"[APO] Templates: {BASE_DIR / 'app' / 'templates'} "
 IMPORT_DIR = BASE_DIR / "imports"
 EXPORT_DIR = BASE_DIR / "exports"
 DATA_DIR = BASE_DIR / "data"
+
+APP_PORT = 5000
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024   # 50 MB
+
+# 로컬 전용 앱이므로 자기 자신 외의 Host/Origin은 받지 않는다.
+_ALLOWED_HOSTS = frozenset(
+    f"{h}:{APP_PORT}" for h in ("127.0.0.1", "localhost", "[::1]")
+) | frozenset(("127.0.0.1", "localhost", "[::1]"))
+_ALLOWED_ORIGINS = frozenset(
+    f"{scheme}://{h}" for scheme in ("http", "https")
+    for h in (f"127.0.0.1:{APP_PORT}", f"localhost:{APP_PORT}", f"[::1]:{APP_PORT}")
+)
 
 
 def _license_required():
@@ -209,6 +221,37 @@ def create_app() -> Flask:
         template_folder=str(BASE_DIR / "app" / "templates"),
         static_folder=str(BASE_DIR / "app" / "static"),
     )
+
+    # 업로드 상한. 미설정 시 설정 파일 하나로 수 GB 메모리를 쓸 수 있다
+    # (파싱 결과가 입력 대비 수십 배로 부풀고, 응답으로 한 번 더 직렬화된다).
+    app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+
+    @app.errorhandler(413)
+    def _too_large(_e):
+        limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+        return jsonify({"error": f"File too large. Limit is {limit_mb} MB."}), 413
+
+    @app.before_request
+    def _guard_origin():
+        """DNS 리바인딩 / 크로스 오리진 요청 차단.
+
+        APO는 127.0.0.1에 바인딩되지만 그것만으로는 브라우저를 통한 접근을
+        막지 못한다. 공격자 페이지가 짧은 TTL로 자기 도메인을 127.0.0.1로
+        재바인딩하면 브라우저는 그 페이지를 APO와 '같은 오리진'으로 취급해,
+        저장된 FortiGate 관리자 토큰을 읽거나 실제 정책을 변경할 수 있다.
+
+        - Host 화이트리스트: 재바인딩된 요청은 Host가 공격자 도메인이라 걸린다.
+        - Origin 검사: multipart는 CORS 프리플라이트가 없어 JSON 라우트와 달리
+          크로스 오리진 POST가 그대로 도달하므로 여기서 막는다.
+        """
+        host = (request.host or "").lower()
+        if host not in _ALLOWED_HOSTS:
+            return jsonify({"error": "Invalid Host header"}), 403
+
+        origin = request.headers.get("Origin")
+        if origin and origin.lower() not in _ALLOWED_ORIGINS:
+            return jsonify({"error": "Cross-origin request rejected"}), 403
+        return None
 
     from datetime import datetime as _dt
 
@@ -332,7 +375,10 @@ def create_app() -> Flask:
         from werkzeug.utils import secure_filename
         payload = request.get_json(silent=True) or {}
         sheets = payload.get("sheets") or {}
-        workbook_name = secure_filename(payload.get("workbook_name", "firewall_policy_optimizer_export")) or "firewall_policy_optimizer_export"
+        # secure_filename은 str만 받는다. JSON으로 null/숫자/객체가 오면
+        # TypeError가 try 밖에서 터져 500이 되고, 콘솔에 절대경로 트레이스백이 남는다.
+        raw_name = payload.get("workbook_name") or "firewall_policy_optimizer_export"
+        workbook_name = secure_filename(str(raw_name)) or "firewall_policy_optimizer_export"
         output_path = EXPORT_DIR / f"{workbook_name}.xlsx"
         try:
             build_workbook(output_path, sheets)
@@ -478,15 +524,22 @@ def create_app() -> Flask:
             return jsonify({"error": "port must be a number"}), 400
         if not (1 <= port <= 65535):
             return jsonify({"error": "port out of range"}), 400
+        from app.services.remediation_service import validate_device_address
+        try:
+            device_ip = validate_device_address(payload.get("ip", ""))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
         device = {
-            "ip":         str(payload.get("ip", "")).strip(),
+            "ip":         device_ip,
             "port":       port,
             "token":      str(payload.get("token", "")).strip(),
             "vdom":       str(payload.get("vdom", "root")).strip() or "root",
-            "verify_ssl": bool(payload.get("verify_ssl", False)),
+            # 기본값 True — 명시적으로 끄지 않는 한 TLS 검증을 수행한다.
+            "verify_ssl": bool(payload.get("verify_ssl", True)),
         }
-        if not device["ip"] or not device["token"]:
-            return jsonify({"error": "ip and token are required"}), 400
+        if not device["token"]:
+            return jsonify({"error": "token is required"}), 400
         app.config['remediation_device'] = device
         return jsonify({"ok": True})
 
