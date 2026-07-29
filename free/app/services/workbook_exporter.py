@@ -103,7 +103,7 @@ def _stringify(value: Any) -> Any:
 from io import BytesIO
 
 SEVERITY_FILLS = {
-    0: PatternFill("solid", fgColor="F1EFE8"),
+    0: PatternFill("solid", fgColor="F0EEE7"),
     1: PatternFill("solid", fgColor="FFCCCC"),
     2: PatternFill("solid", fgColor="D3D1C7"),
     3: PatternFill("solid", fgColor="FFE0B2"),
@@ -114,11 +114,22 @@ SEVERITY_FILLS = {
 }
 
 SEVERITY_COLS = [
-    "urgency", "risk_level", "recommended_action", "reason",
-    "traffic_type", "tags",
-    "policy_id", "name", "ritm", "request_date", "requester",
-    "srcaddr_display", "dstaddr_display", "service_display",
-    "action", "status", "schedule", "hit_count", "last_used",
+    ("urgency",             "Severity"),
+    ("risk_level",          "Risk Level"),
+    ("recommended_action",  "Recommended Action"),
+    ("reason",              "Reason"),
+    ("traffic_type",        "Traffic Type"),
+    ("tags",                "Tags"),
+    ("policy_id",           "Policy ID"),
+    ("name",                "Policy Name"),
+    ("srcaddr_display",     "Source Address"),
+    ("dstaddr_display",     "Destination Address"),
+    ("service_display",     "Service"),
+    ("action",              "Action"),
+    ("status",              "Status"),
+    ("schedule",            "Schedule"),
+    ("hit_count",           "Hit Count"),
+    ("last_used",           "Last Used"),
 ]
 
 
@@ -137,16 +148,16 @@ def build_severity_workbook(result: dict) -> bytes:
 
     for sheet_name, policies in sheet_map:
         ws = wb.create_sheet(sheet_name)
-        for col_idx, col in enumerate(SEVERITY_COLS, 1):
-            cell = ws.cell(row=1, column=col_idx, value=col)
+        for col_idx, (field, label) in enumerate(SEVERITY_COLS, 1):
+            cell = ws.cell(row=1, column=col_idx, value=label)
             cell.fill = HEADER_FILL
             cell.font = HEADER_FONT
             cell.alignment = Alignment(horizontal='center', vertical='center')
         for row_idx, p in enumerate(policies, 2):
             sev = p.get("urgency", 0)
             fill = SEVERITY_FILLS.get(sev, SEVERITY_FILLS[0])
-            for col_idx, col in enumerate(SEVERITY_COLS, 1):
-                val = p.get(col, "")
+            for col_idx, (field, label) in enumerate(SEVERITY_COLS, 1):
+                val = p.get(field, "")
                 if isinstance(val, list):
                     val = ", ".join(str(v) for v in val)
                 cell = ws.cell(row=row_idx, column=col_idx, value=str(val) if val else "")

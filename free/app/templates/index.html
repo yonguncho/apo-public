@@ -7,26 +7,29 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
 </head>
 <body>
-  <header class="hero">
-    <div class="hero-inner">
-      <div class="brand">
-        <div class="brand-badge">
-          <img src="{{ url_for('static', filename='skax-logo.png') }}" alt="APO logo" class="logo" />
-        </div>
-        <div class="brand-copy">
-          <h1>AI-Policy Optimizer <span class="apo-mark">(APO)</span></h1>
-          <p>NIST SP 800-41 based firewall policy optimization and risk classification tool.</p>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <div class="app-brand">
+        <img src="{{ url_for('static', filename='apo-logo.png') }}" alt="APO" class="app-logo" />
+        <div>
+          <div class="app-title">AI-Policy Optimizer <span class="app-title-muted">(APO)</span></div>
+          <div class="app-subtitle">AI-Powered Automation · FortiGate</div>
         </div>
       </div>
     </div>
   </header>
 
-  <main class="container">
-    <section class="view-switch-card">
+  <nav class="app-nav">
+    <div class="app-nav-inner">
       <button type="button" class="view-switch-btn active" data-view="analysis">Policy Analysis</button>
-      <button type="button" class="view-switch-btn" data-view="diff">Configuration Change Review</button>
+      <button type="button" class="view-switch-btn" data-view="diff">Config Change Review</button>
       <button type="button" class="view-switch-btn" data-view="severity">Severity Results</button>
-    </section>
+      <button type="button" class="view-switch-btn" data-view="remediation">Remediation</button>
+      <button type="button" class="view-switch-btn" data-view="advisor">Version Advisor</button>
+    </div>
+  </nav>
+
+  <main class="container">
 
     <section id="analysisView" class="page-view">
       <div class="page-intro-card">
@@ -94,7 +97,7 @@
           <label class="filter-pill"><input type="checkbox" id="filterHitZero" /> Hit Count = 0</label>
           <label class="filter-pill"><input type="checkbox" id="filterDormantYear" /> Last Used &gt; 1 year</label>
           <label class="filter-pill"><input type="checkbox" id="filterExpiredSchedule" /> Expired schedule</label>
-          <label class="filter-pill"><input type="checkbox" id="filterNoItsRequest" /> No Change Ticket</label>
+          <label class="filter-pill"><input type="checkbox" id="filterNoItsRequest" /> No ITS Request</label>
           <label class="filter-pill filter-pill-accent"><input type="checkbox" id="filterDeletable" /> Deletable policy</label>
         </div>
         <div class="tabs">
@@ -175,7 +178,7 @@
       <div class="page-intro-card">
         <span class="section-index">Severity Classification</span>
         <h2>Policy Risk Assessment</h2>
-        <p>NIST SP 800-41 기반 긴급도 분류. User IP 대역 설정 후 분류 적용 시 Severity 1~7 전체 판단. Severity 1/2/7은 IP 대역 없이도 판단 가능.</p>
+        <p>NIST SP 800-41 based urgency classification. Set User IP ranges and click Classify to assess all Severity levels (1–7). Severity 1, 2, and 7 can be determined even without IP ranges configured.</p>
       </div>
 
       <article class="glass-card" style="margin-bottom:20px;padding:20px">
@@ -185,83 +188,83 @@
         <div style="overflow:auto">
           <table class="severity-guide-table">
             <thead>
-              <tr><th>Severity</th><th>Risk Level</th><th>Action</th><th>Classification Criteria (NIST SP 800-41 / CIS Controls)</th><th>Notes</th></tr>
+              <tr><th>Severity</th><th>Risk Level</th><th>Action</th><th>Classification Criteria</th><th>Notes</th></tr>
             </thead>
             <tbody>
               <tr class="sev-7">
                 <td><span class="sev-badge s7">7</span></td>
                 <td>None</td>
-                <td>Keep rule</td>
-                <td>① Action = Deny (by design)<br>② ICMP-only service (Ping, diagnostic traffic)<br>③ Valid change ticket registered + schedule not expired<br>④ Rule name contains &quot;controlled&quot; (multi-firewall traversal policy)<br>⑤ Customer-designated admin policy object (configurable)</td>
-                <td>Compliant rules — not subject to removal or disabling</td>
+                <td>Keep</td>
+                <td>① Action = Deny<br>② ICMP-only service (Ping, etc.)<br>③ Valid ITS ticket (ticket ID present + schedule not expired)<br>④ Policy name contains "controlled" (multi-firewall passthrough)<br>⑤ Policy matches a configured admin object</td>
+                <td>Exception policies — not subject to disable or deletion</td>
               </tr>
               <tr class="sev-1">
                 <td><span class="sev-badge s1">1</span></td>
                 <td>Critical</td>
-                <td>Disable immediately</td>
-                <td>① Source, destination, AND service all Any/All (violates least-privilege)<br>② Source or destination Any/All + Hit Count = 0<br>③ Source or destination Any/All + Hit Count &gt; 0 but Last Used &gt; 1yr (long idle)<br>④ Insecure/legacy protocol only (FTP, TELNET, TFTP, RLOGIN, RSH)<br>⑤ Insecure + normal services mixed + unused or Last Used &gt; 1yr<br>⑥ Customer-designated high-risk object (configurable)<br>⑦ Temporary keyword in rule name + no change ticket + unused<br>⑧ Service ALL + unused or Last Used &gt; 1yr</td>
-                <td>Disable first; delete after confirming zero traffic</td>
+                <td>Disable Immediately</td>
+                <td>① Source, destination, <strong>and</strong> service are all Any/All<br>② Source or destination Any/All + Hit Count = 0<br>③ Source or destination Any/All + Hit Count &gt; 0 but Last Used ≥ 1 year<br>④ <strong>Risky service only</strong> (FTP, TELNET, TFTP, RLOGIN, RSH)<br>⑤ Risky + normal service <strong>mixed</strong> + Hit Count = 0 or Last Used ≥ 1 year<br>⑥ Temp keyword in name (temp, etc.) + No ITS Request + Hit Count = 0<br>⑦ Service ALL + Hit Count = 0 or Last Used ≥ 1 year</td>
+                <td>After disabling, delete once Hit Count confirms 0</td>
               </tr>
               <tr class="sev-2">
                 <td><span class="sev-badge s2">2</span></td>
                 <td>High</td>
-                <td>Delete rule</td>
-                <td>① Status = Disabled<br>② Schedule expired (date-based schedule in the past)<br>③ Hit=0 + Accept + Server→User + registered &gt; 1yr ago<br>④ Hit=0 + Accept + Server↔Server + always-on + &gt; 1yr old</td>
-                <td>Rules registered &lt; 1yr are exempt. Server-Server date schedules use 2yr threshold</td>
+                <td>Delete Required</td>
+                <td>① Status = Disabled<br>② Schedule expired (YYMMDD date is in the past)<br>③ Hit=0 + Accept + Server↔User + registered ≥ 1 year ago<br>④ Hit=0 + Accept + Server - Server + always schedule + &gt; 1 year</td>
+                <td>Policies registered &lt; 1 year are excluded. S-S date schedules apply a 2-year threshold</td>
               </tr>
               <tr class="sev-3">
                 <td><span class="sev-badge s3">3</span></td>
                 <td>Medium</td>
-                <td>Review required</td>
-                <td>① Server→User + &gt; 1yr old + Hit &lt; (age×100) + <strong>Last Used &gt; 1yr</strong><br>② Insecure + normal services <strong>mixed</strong> + <strong>actively used (&lt; 1yr)</strong><br>③ Source/dest Any/All + active use (&lt; 1yr) + Server→User<br>④ Service ALL + active use (&lt; 1yr) + Server→User</td>
-                <td>② Mixed insecure services: do NOT delete the whole rule — <strong>remove only the insecure service/port</strong></td>
+                <td>Additional Review Required</td>
+                <td>① Server - User + registered &gt; 1 year + Hit &lt; elapsed years×100 + <strong>Last Used ≥ 1 year</strong><br>② Risky + normal service <strong>mixed</strong> + <strong>actively used (within 1 year)</strong><br>③ Source/Destination Any·All + active use (within 1yr) + Server - User<br>④ Service ALL + active use (within 1yr) + Server - User</td>
+                <td>② Mixed risky policy: do NOT delete the entire rule — <strong>remove only the risky service/port</strong>, keep normal services</td>
               </tr>
               <tr class="sev-4">
                 <td><span class="sev-badge s4">4</span></td>
                 <td>Medium</td>
-                <td>Review required</td>
-                <td>① Server↔Server + &gt; 2yr old + Hit &lt; 50<br>② Server↔Server + creation date unknown<br>③ Source/dest Any/All + active use (&lt; 1yr) + Server↔Server<br>④ Service ALL + active use (&lt; 1yr) + Server↔Server</td>
-                <td>For active Any/All rules: consider scope reduction rather than immediate disable</td>
+                <td>Additional Review Required</td>
+                <td>① Server - Server + registered &gt; 2 years + Hit &lt; 50<br>② Server - Server + registration date unknown<br>③ Source/Destination Any·All + active use (within 1yr) + Server - Server<br>④ Service ALL + active use (within 1yr) + Server - Server</td>
+                <td>For active Any/All policies, recommend narrowing scope instead of immediate disable</td>
               </tr>
               <tr class="sev-5">
                 <td><span class="sev-badge s5">5</span></td>
                 <td>Low</td>
-                <td>Keep + request change ticket</td>
-                <td>① Server→User + registered &lt; 1yr + no change ticket<br>② Server→User + &gt; 1yr old + low hit count + <strong>Last Used &lt; 1yr</strong> (active but not formally registered)<br>③ Customer-designated user segment object (configurable)<br>④ Service ALL + active use (&lt; 1yr) + Server→User</td>
-                <td>Rule is operationally needed — register formally via change management process</td>
+                <td>Request ITS Ticket</td>
+                <td>① Server - User + registered &lt; 1 year + no ticket ID<br>② Server - User + registered &gt; 1 year + insufficient hits + <strong>Last Used &lt; 1 year</strong> (recently active but not formally registered)<br>③ Service ALL + active use (within 1yr) + Server - User</td>
+                <td>Keep policy but formally register it via ITS Ticket</td>
               </tr>
               <tr class="sev-6">
                 <td><span class="sev-badge s6">6</span></td>
                 <td>Low</td>
-                <td>Keep + request change ticket</td>
-                <td>① AD/DNS/LDAP authentication service + Hit &gt; 0<br>② Server↔Server + &lt; 2yr old + no change ticket<br>③ Server↔Server + Hit ≥ 50 (actively used)<br>④ Customer-designated infrastructure or management object (configurable)</td>
-                <td>Rule is actively needed — register formally via change management process</td>
+                <td>Request ITS Ticket</td>
+                <td>① AD/DNS/LDAP authentication service + Hit &gt; 0<br>② Server - Server + within 2 years + no ticket ID<br>③ Server - Server + Hit ≥ 50<br>④ A configured infrastructure or management object is included</td>
+                <td>Keep policy but formally register it via ITS Ticket</td>
               </tr>
             </tbody>
           </table>
-          <p class="sev-guide-note">※ Without User IP ranges configured, Server/User traffic type cannot be determined — <strong>Severity 1, 2, and 7 can be classified without IP ranges</strong></p>
+          <p class="sev-guide-note">※ Without User IP ranges configured, traffic type (Server/User) cannot be determined — <strong>Severity 1, 2, and 7 can still be assessed without IP ranges</strong></p>
         </div>
       </article>
 
       <article class="glass-card" style="margin-bottom:20px;padding:20px">
         <div class="section-heading">
-          <div><span class="section-index">Step 1</span><h2>User IP 대역 설정</h2></div>
-          <span class="inline-status">입력 안 해도 Severity 1/2/7은 판단 가능. 입력 시 전체 분류 활성화.</span>
+          <div><span class="section-index">Step 1</span><h2>User IP Range Configuration</h2></div>
+          <span class="inline-status">Severity 1/2/7 can be assessed without IP ranges. Adding ranges enables full classification.</span>
         </div>
         <div class="sev-user-range-row">
-          <input type="text" id="sevRangeInput" class="sev-user-range-input" placeholder="CIDR (예: 10.99.240.0/21)" />
-          <button type="button" id="sevRangeAddBtn" class="secondary-btn">추가</button>
-          <button type="button" id="sevRangeImportBtn" class="secondary-btn">파일 가져오기</button>
+          <input type="text" id="sevRangeInput" class="sev-user-range-input" placeholder="CIDR (e.g. 10.99.240.0/21)" />
+          <button type="button" id="sevRangeAddBtn" class="secondary-btn">Add</button>
+          <button type="button" id="sevRangeImportBtn" class="secondary-btn">Import from File</button>
           <input type="file" id="sevRangeImportFile" accept=".txt,.csv" hidden />
-          <button type="button" id="sevClassifyBtn" class="primary-btn">분류 적용</button>
+          <button type="button" id="sevClassifyBtn" class="primary-btn">Classify</button>
         </div>
         <div id="sevRangeTags" class="sev-user-range-tags"></div>
-        <div class="inline-status" id="sevClassifyStatus">Config 파일을 먼저 로드하세요.</div>
+        <div class="inline-status" id="sevClassifyStatus">Please load a Config file first.</div>
       </article>
 
       <article class="glass-card" id="sevPhase2Card" style="margin-bottom:20px;padding:20px;display:none">
         <div class="section-heading">
-          <div><span class="section-index">분류 결과</span><h2>Severity 분류 결과</h2></div>
+          <div><span class="section-index">Results</span><h2>Severity Classification Results</h2></div>
           <button type="button" id="sevExportBtn" class="secondary-btn">Export to Excel</button>
         </div>
         <div id="sevSummaryBar" class="sev-summary-bar"></div>
@@ -275,45 +278,222 @@
         <div id="sevTableContent" class="sev-table-wrap"></div>
       </article>
     </section>
+    <!-- Version Advisor View -->
+    <section id="advisorView" class="page-view hidden">
+      <div class="page-intro-card">
+        <span class="section-index">Version Advisor</span>
+        <h2>FortiOS Vulnerability &amp; Bug Advisory</h2>
+        <p>Detects the FortiOS version from the loaded config and checks for known CVEs (fortiguard.com) and bug reports (docs.fortinet.com). Load a Config File first, then click Analyze.</p>
+      </div>
+
+      <article class="glass-card" style="margin-bottom:20px;padding:20px">
+        <div class="section-heading">
+          <div><span class="section-index">Detection</span><h2>Version Detection</h2></div>
+          <button type="button" id="advisorRunBtn" class="primary-btn">Analyze</button>
+        </div>
+        <div id="advisorVersionBox" class="summary-stats" style="min-height:40px"></div>
+        <div id="advisorStatus" class="inline-status" style="margin-top:8px">Load a Config File and click Analyze.</div>
+      </article>
+
+      <article class="glass-card" id="advisorResultCard" style="padding:20px;display:none">
+        <div class="advisor-summary-bar" id="advisorSummaryBar"></div>
+
+        <!-- CVE 섹션 -->
+        <div class="advisor-section">
+          <div class="advisor-section-title">
+            <span class="advisor-icon">🔴</span> Active CVEs
+            <span class="advisor-badge-count" id="advisorCveCount"></span>
+          </div>
+          <div id="advisorCveTable"></div>
+        </div>
+
+        <!-- 업그레이드 수정 섹션 -->
+        <div class="advisor-section" style="margin-top:28px">
+          <div class="advisor-section-title">
+            <span class="advisor-icon">🔧</span> Fixes Available in Newer Versions
+            <span class="advisor-badge-count" id="advisorFixCount"></span>
+          </div>
+          <div id="advisorFixTable"></div>
+        </div>
+
+        <!-- Known Issues 섹션 -->
+        <div class="advisor-section" style="margin-top:28px">
+          <div class="advisor-section-title">
+            <span class="advisor-icon">⚠️</span> Known Issues in Current Version
+            <span class="advisor-badge-count" id="advisorKnownCount"></span>
+          </div>
+          <div id="advisorKnownTable"></div>
+        </div>
+
+        <!-- Patched CVEs hidden — not shown to user -->
+      </article>
+    </section>
+
+    <!-- ── Remediation View ───────────────────────────────────────────── -->
+    <section id="remediationView" class="page-view hidden">
+      <div class="page-intro-card">
+        <span class="section-index">Remediation</span>
+        <h2>Policy Remediation</h2>
+        <p>Review Critical / High severity policies and disable them directly on the FortiGate via REST API, or export as a Postman Collection / CSV for offline review.</p>
+      </div>
+
+      <!-- Step 1 — Device Registration -->
+      <article class="glass-card" id="remDeviceCard" style="margin-bottom:20px;padding:24px">
+        <div class="section-heading">
+          <div><span class="section-index">Step 1</span><h2>FortiGate Device Registration</h2></div>
+          <span id="remDeviceStatus" class="inline-status"></span>
+        </div>
+        <div class="rem-device-form">
+          <label class="rem-label">IP Address<input id="remIp" type="text" class="rem-input" placeholder="192.168.1.1"></label>
+          <label class="rem-label">Port<input id="remPort" type="number" class="rem-input rem-input-sm" value="443"></label>
+          <label class="rem-label">VDOM<input id="remVdom" type="text" class="rem-input rem-input-sm" placeholder="root" value="root"></label>
+          <label class="rem-label">API Token<input id="remToken" type="password" class="rem-input rem-input-lg" placeholder="API access token"></label>
+          <label class="rem-label rem-label-check"><input id="remSkipSsl" type="checkbox" checked> Skip SSL Verify</label>
+          <div class="rem-device-actions">
+            <button id="remSaveBtn" class="primary-btn">Save Device</button>
+            <button id="remTestBtn" class="secondary-btn">Test Connection</button>
+          </div>
+        </div>
+      </article>
+
+      <!-- Step 2 — Candidate List -->
+      <article class="glass-card" style="margin-bottom:20px;padding:24px">
+        <div class="section-heading">
+          <div><span class="section-index">Step 2</span><h2>Disable Candidates</h2></div>
+          <div class="rem-toolbar-right">
+            <button id="remLoadBtn" class="primary-btn">Load Candidates</button>
+            <button id="remExportCsvBtn" class="secondary-btn">Export CSV</button>
+            <button id="remExportJsonBtn" class="secondary-btn">Export JSON</button>
+            <button id="remApplyBtn" class="rem-btn-danger" disabled>Apply Disable to Selected</button>
+          </div>
+        </div>
+        <p id="remLoadStatus" class="inline-status" style="display:block;margin-bottom:16px;text-align:left"></p>
+
+        <!-- Active candidates: shared Select All bar -->
+        <div id="remActiveHeader" style="display:none;margin-bottom:12px">
+          <div class="rem-section-header" style="border-bottom:none;margin-bottom:0">
+            <span id="remSelectedCount" class="rem-selected-count">0 / 0 selected</span>
+            <label class="rem-check-all-label" style="margin-left:auto"><input type="checkbox" id="remCheckAll"> Select All</label>
+          </div>
+        </div>
+
+        <!-- Step 1: Critical — Disable Immediately -->
+        <div id="remCriticalSection" style="display:none">
+          <div class="rem-section-header">
+            <span class="rem-section-label rem-label-critical">Step 1 — Disable (Critical)</span>
+            <span id="remCriticalCount" class="rem-section-count" style="margin-left:8px"></span>
+            <span class="rem-section-desc" style="margin-left:8px">Disable immediately</span>
+          </div>
+          <div class="rem-table-wrap">
+            <table class="rem-table" id="remCriticalTable">
+              <thead><tr>
+                <th style="width:40px"></th>
+                <th>ID</th><th>Name</th><th>Risk</th>
+                <th>Source IP</th><th>Destination IP</th><th>Service</th><th>Schedule</th><th>Reason</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Step 2: High — Review / Delete -->
+        <div id="remHighSection" style="display:none;margin-top:20px">
+          <div class="rem-section-header">
+            <span class="rem-section-label rem-label-high">Step 2 — Disable (High)</span>
+            <span id="remHighCount" class="rem-section-count" style="margin-left:8px"></span>
+            <span class="rem-section-desc" style="margin-left:8px">Disable now — review for deletion separately</span>
+          </div>
+          <div class="rem-table-wrap">
+            <table class="rem-table" id="remHighTable">
+              <thead><tr>
+                <th style="width:40px"></th>
+                <th>ID</th><th>Name</th><th>Risk</th>
+                <th>Source IP</th><th>Destination IP</th><th>Service</th><th>Schedule</th><th>Reason</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Already disabled -->
+        <div id="remDisabledSection" style="display:none;margin-top:28px">
+          <div class="rem-section-header">
+            <span class="rem-section-label rem-label-disabled">Already Disabled</span>
+            <span id="remDisabledCount" class="rem-section-count" style="margin-left:8px"></span>
+            <span class="rem-section-desc" style="margin-left:12px">Already inactive in config — no API action needed</span>
+          </div>
+          <div class="rem-table-wrap">
+            <table class="rem-table" id="remDisabledTable">
+              <thead><tr>
+                <th>ID</th><th>Name</th><th>Risk</th>
+                <th>Source IP</th><th>Destination IP</th><th>Service</th><th>Schedule</th><th>Reason</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </article>
+
+      <!-- Apply Results -->
+      <article class="glass-card hidden" id="remResultCard" style="padding:24px;margin-bottom:20px">
+        <div class="section-heading">
+          <div><span class="section-index">Results</span><h2>Apply Results</h2></div>
+        </div>
+        <div id="remResultBody"></div>
+      </article>
+
+      <!-- Confirm Modal -->
+      <div id="remModal" class="rem-modal-backdrop hidden">
+        <div class="rem-modal">
+          <h3 class="rem-modal-title">Confirm Policy Disable</h3>
+          <p id="remModalMsg" class="rem-modal-msg"></p>
+          <div class="rem-modal-actions">
+            <button id="remModalCancel" class="secondary-btn">Cancel</button>
+            <button id="remModalConfirm" class="rem-btn-danger">Apply</button>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="footer-signature">
     <div class="footer-product">AI-Policy Optimizer <span class="apo-mark-dark">(APO)</span></div>
-    <div class="footer-tagline">NIST SP 800-41 based firewall policy optimization and risk classification tool.</div>
-    <div class="footer-credit">Crafted by <strong>Jayden</strong></div>
+    <div class="footer-tagline">AI-Powered Automation, Purpose-Built for FortiGate Firewalls.</div>
+    <div class="footer-copyright">© {{ current_year }} Choice Guide Lab. All rights reserved.</div>
+    <div class="footer-legal">This software is proprietary and licensed for use by authorized users only. Unauthorized reproduction, redistribution, or reverse engineering is strictly prohibited. All configuration data is processed locally on your device and is never transmitted to external servers. Analysis results are provided for operational reference only — all policy decisions and resulting network changes are the sole responsibility of the user.</div>
   </footer>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
-
-  <!-- 라이선스 모달 -->
+  <!-- 라이선스 모달 (script 태그 앞에 위치해야 DOM 접근 가능) -->
   <div id="licenseModal" class="lic-overlay hidden">
     <div class="lic-modal">
       <div class="lic-header">
         <span class="section-index">Export</span>
-        <h2 style="margin:6px 0 0;font-size:20px;color:var(--text-strong)">Export 라이선스 필요</h2>
+        <h2 style="margin:6px 0 0;font-size:20px;color:var(--text-strong)">Export License Required</h2>
       </div>
 
       <div class="lic-section">
-        <div class="lic-label">라이선스 키가 있으신가요?</div>
+        <div class="lic-label">Have a license key?</div>
         <div class="lic-row">
           <input type="text" id="licKeyInput" class="lic-input" placeholder="APO-eyJ..." autocomplete="off" />
-          <button type="button" id="licActivateBtn" class="primary-btn">활성화</button>
+          <button type="button" id="licActivateBtn" class="primary-btn">Activate</button>
         </div>
         <div id="licActivateMsg" class="lic-msg"></div>
       </div>
 
-      <div class="lic-divider">또는</div>
+      <div class="lic-divider">or</div>
 
       <div class="lic-section">
-        <div class="lic-label">아직 구매 전이라면</div>
+        <div class="lic-label">Don't have a license yet?</div>
         <div class="lic-row">
-          <input type="email" id="licEmailInput" class="lic-input" placeholder="이메일 주소 입력" />
-          <button type="button" id="licBuyBtn" class="secondary-btn">구매하기 →</button>
+          <input type="email" id="licEmailInput" class="lic-input" placeholder="Enter your email" />
+          <button type="button" id="licBuyBtn" class="secondary-btn">Buy Now →</button>
         </div>
-        <div class="lic-note">결제 완료 후 라이선스 키를 이메일로 발송해 드립니다.<br>1회 구매 · 영구 사용 · 폐쇄망 지원</div>
+        <div class="lic-note">Enter your email and click <strong>Buy Now</strong> → checkout opens in a new tab.<br>Your license key will be emailed to you after purchase.<br>One-time purchase · Lifetime license · Air-gapped network support</div>
       </div>
 
       <button type="button" id="licCloseBtn" class="lic-close">✕</button>
     </div>
   </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

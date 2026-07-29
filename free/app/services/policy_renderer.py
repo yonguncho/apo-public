@@ -4,8 +4,23 @@ import re
 from datetime import date
 from typing import Any
 
+from .customer_rules_loader import load_customer_rules
 
-_RITM_PATTERN = re.compile(r"RITM\d+", re.IGNORECASE)
+
+def _compile_ticket_pattern() -> re.Pattern | None:
+    """고객사 ITSM 티켓 ID 패턴은 customer_rules.json의 ticket_id_pattern으로 설정한다.
+    설정이 없으면 오탐(false positive) 방지를 위해 티켓 ID 추출 자체를 건너뛴다
+    (has_ritm=False로만 처리, 잘못된 매칭 없음)."""
+    pattern = load_customer_rules().get("ticket_id_pattern")
+    if not pattern:
+        return None
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        return None
+
+
+_TICKET_PATTERN = _compile_ticket_pattern()
 _YYMMDD_PATTERN = re.compile(r"^\d{6}$")
 
 
@@ -25,13 +40,15 @@ def _parse_yymmdd(token: str) -> date | None:
 
 def extract_name_metadata(name: str, schedule: str | None = None) -> dict[str, Any]:
     """
-    Policy Name format: YYMMDD_RITMxxxxxxx_requester
+    Policy Name format: YYMMDD_<ticket-id>_requester
 
     Returns dict with:
         request_date: date or None
             - first token of name when YYMMDD
             - falls back to schedule when name has no date token
-        ritm: str or None (matches RITM<digits> case-insensitive, normalized to upper)
+        ritm: str or None (ticket ID matched via customer_rules.json's
+            ticket_id_pattern, case-insensitive, normalized to upper;
+            None when no pattern is configured)
         requester: str or None (third underscore-token if present)
         is_controlled: bool (True when 'controlled' is in name, marks
             multi-firewall passthrough policy => urgency 7)
@@ -47,7 +64,7 @@ def extract_name_metadata(name: str, schedule: str | None = None) -> dict[str, A
     if "controlled" in name.lower():
         result["is_controlled"] = True
 
-    ritm_match = _RITM_PATTERN.search(name)
+    ritm_match = _TICKET_PATTERN.search(name) if _TICKET_PATTERN else None
     if ritm_match:
         result["ritm"] = ritm_match.group().upper()
 
@@ -299,7 +316,14 @@ def _render_address(item: dict[str, Any]) -> str:
     name = str(item.get("name", "")).strip()
     addr_type = item.get("type", "ipmask")
     if addr_type == "ipmask":
-        return item.get("subnet_cidr") or (name if name else str(item.get("subnet", "")))
+        if item.get("subnet_cidr"):
+            return item["subnet_cidr"]
+        subnet = item.get("subnet")
+        if isinstance(subnet, list) and subnet:
+            return "/".join(str(x) for x in subnet)
+        if subnet:
+            return str(subnet)
+        return name
     if addr_type == "iprange":
         return item.get("range") or name or ""
     if addr_type == "fqdn":

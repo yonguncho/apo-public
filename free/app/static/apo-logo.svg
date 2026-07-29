@@ -1,0 +1,12 @@
+<svg width="80" height="80" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+  <!-- 빨간 배경 -->
+  <rect width="80" height="80" rx="16" fill="#D62B20"/>
+  <!-- 상단 좌 흰 사각형 -->
+  <rect x="10" y="10" width="26" height="26" rx="4" fill="white"/>
+  <!-- 상단 우 흰 사각형 -->
+  <rect x="44" y="10" width="26" height="26" rx="4" fill="white"/>
+  <!-- 하단 좌 흰 사각형 -->
+  <rect x="10" y="44" width="26" height="26" rx="4" fill="white"/>
+  <!-- 하단 우 반투명 사각형 (포티넷 스타일 변형) -->
+  <rect x="44" y="44" width="26" height="26" rx="4" fill="rgba(255,255,255,0.35)"/>
+</svg>

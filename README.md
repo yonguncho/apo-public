@@ -45,14 +45,25 @@ Questions, bugs, or license issues: **choiceguidelab@gmail.com**
 See [LICENSE.md](LICENSE.md) for usage terms and [EULA.md](EULA.md) for the
 paid Export license agreement.
 
+## Free vs. paid — one binary
+
+There is a single APO build. Run it without a license and you get the free
+tier; activate an Export license key and the Excel export unlocks. The paid
+export endpoints are enforced **server-side**, so the free tier cannot be
+unlocked by tampering with the UI.
+
 ## Repository layout
 
 ```
-app/    — legacy source tree (pre-v59), kept for reference only
-free/   — free-edition source tree (pre-v60), kept for reference only
-paid/   — paid-edition changelog notes; binaries are distributed via Releases
+free/   — published source tree for the shipping build (synced from the
+          internal repo at release time)
+paid/   — paid-edition notes; binaries are distributed via Releases only
 ```
 
-> **Note:** the `app/` and `free/` source trees predate the current shipping
-> build and are not kept in sync release-to-release. They are not meant to be
-> built from directly — always download from Releases above.
+Notes:
+- `free/customer_rules.json` is an **optional** config file, shipped empty /
+  neutral. APO works out of the box without it; fill it in only if you want to
+  special-case objects in your own environment (see the `_fields` comments
+  inside the file).
+- `free/app/data/vuln_db.json` is a generated data file (~6 MB) and is not
+  committed; it ships inside the release binary.

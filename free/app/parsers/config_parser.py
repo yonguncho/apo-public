@@ -25,6 +25,7 @@ class ParseState:
     current_section: str | None = None
     current_object: dict[str, Any] | None = None
     config_stack: list[str] = field(default_factory=list)
+    section_depth: int | None = None   # target 섹션이 열린 시점의 스택 깊이
     parsed: dict[str, Any] = field(
         default_factory=lambda: {
             "meta": {},
@@ -58,23 +59,30 @@ class FortiGateConfigParser:
 
             if line.startswith("config "):
                 state.config_stack.append(line)
-                if line in TARGET_SECTIONS:
+                # 이미 target 섹션 안(중첩 config, 예: config secondaryip)이면 섹션 전환하지 않는다.
+                if line in TARGET_SECTIONS and state.current_section is None:
                     state.current_section = TARGET_SECTIONS[line]
                     state.current_object = None
+                    state.section_depth = len(state.config_stack)  # 이 섹션이 열린 스택 깊이 기록
                 continue
 
             if line == "end":
                 ended = state.config_stack.pop() if state.config_stack else None
-                if ended in TARGET_SECTIONS:
+                # target 섹션 자신의 end일 때만 섹션 종료 (중첩 블록의 end는 무시)
+                if (ended in TARGET_SECTIONS
+                        and state.section_depth is not None
+                        and len(state.config_stack) < state.section_depth):
                     state.current_section = None
                     state.current_object = None
+                    state.section_depth = None
                 continue
 
             if state.current_section is None:
                 continue
 
-            # Ignore nested config bodies inside a target object, e.g. config secondaryip
-            if len(state.config_stack) > 1:
+            # target 섹션보다 더 깊은 중첩 config 본문(예: config secondaryip)은 무시.
+            # 다중 VDOM 등으로 target 섹션이 depth 1이 아닐 수 있으므로 절대값 대신 섹션 깊이 기준으로 비교.
+            if state.section_depth is not None and len(state.config_stack) > state.section_depth:
                 continue
 
             if line.startswith("edit "):
@@ -107,7 +115,8 @@ class FortiGateConfigParser:
         return state.parsed
 
     def _parse_meta(self, state: ParseState) -> None:
-        for raw_line in self.lines[:50]:
+        # hostname은 'config system global' 아래에 있어 50줄을 넘어갈 수 있으므로 전체를 스캔한다.
+        for raw_line in self.lines:
             line = raw_line.strip()
             if line.startswith("#config-version="):
                 state.parsed["meta"]["config_version"] = line.split("=", 1)[1]
@@ -118,23 +127,33 @@ class FortiGateConfigParser:
                     line.split("set hostname", 1)[1].strip()
                 )
 
+    # 따옴표 토큰(이스케이프된 \" 포함)과 일반 토큰을 원래 순서대로 캡처
+    _TOKEN_RE = re.compile(r'"((?:[^"\\]|\\.)*)"|(\S+)')
+
+    @classmethod
+    def _tokenize_value(cls, raw_value: str) -> list[str]:
+        tokens: list[str] = []
+        for m in cls._TOKEN_RE.finditer(raw_value):
+            if m.group(1) is not None:
+                # 따옴표 값: \" 와 \\ 언이스케이프
+                tokens.append(m.group(1).replace('\\"', '"').replace('\\\\', '\\'))
+            else:
+                tokens.append(m.group(2))
+        return tokens
+
     def _parse_set_line(self, line: str) -> tuple[str, Any]:
         m = re.match(r"set\s+(\S+)\s+(.+)$", line)
         if not m:
             raise ValueError("Invalid set line")
         key, raw_value = m.group(1), m.group(2).strip()
 
-        quoted = re.findall(r'"([^"]+)"', raw_value)
-        if quoted:
-            raw_without_quotes = re.sub(r'"[^"]+"', '', raw_value).strip()
-            if raw_without_quotes:
-                return key, quoted + raw_without_quotes.split()
-            return key, quoted[0] if len(quoted) == 1 else quoted
-
-        parts = raw_value.split()
-        if len(parts) == 1:
-            return key, parts[0]
-        return key, parts
+        # 단일 패스 토큰화로 원래 순서 유지 + 이스케이프된 따옴표 처리
+        tokens = self._tokenize_value(raw_value)
+        if not tokens:
+            return key, ""
+        if len(tokens) == 1:
+            return key, tokens[0]
+        return key, tokens
 
     def _normalize_object(self, section: str, obj: dict[str, Any]) -> dict[str, Any]:
         item = dict(obj)
@@ -235,8 +254,12 @@ class FortiGateConfigParser:
 
     @staticmethod
     def _to_cidr(ip_str: str, mask_str: str) -> str:
-        network = ipaddress.IPv4Network(f"{ip_str}/{mask_str}", strict=False)
-        return str(network)
+        try:
+            network = ipaddress.IPv4Network(f"{ip_str}/{mask_str}", strict=False)
+            return str(network)
+        except Exception:
+            # 잘못된 IP/마스크(또는 IPv6 등)로 파싱 실패 시 파서 전체가 죽지 않도록 원본 표기
+            return f"{ip_str}/{mask_str}".strip("/")
 
 
 def build_service_group_map(service_groups: list[dict[str, Any]]) -> dict[str, list[str]]:

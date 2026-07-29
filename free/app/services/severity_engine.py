@@ -1,79 +1,39 @@
 """
-APO Severity Engine — Public / Generic Edition
-================================================
-NIST SP 800-41 / CIS Controls based firewall policy risk classification.
-Customer-specific exceptions are managed via customer_rules.json.
+APO Severity Engine
+===================
+고객별 예외 조건은 실행 디렉토리(또는 exe 인접 경로)의 customer_rules.json 파일로 관리한다.
+파일이 없으면 중립 기본값(빈 리스트)으로 동작 — 기본 배포본은 이 파일 없이도 정상 동작한다.
+customer_rules_loader.py 참고.
 """
 
-import json
-import os
 from datetime import date
 from .schedule_utils import is_expired_schedule, is_always_schedule, get_schedule_date
 from .ip_classifier import classify_traffic_type
+from .customer_rules_loader import load_customer_rules
 
 # ================================================================
-# CUSTOMER_RULES — loaded from customer_rules.json (empty defaults)
-# Fields:
-#   high_risk_objects    : Objects always classified Critical (S1)
-#   user_segment_objects : User-side segment objects -> Low-High (S5)
-#   mgmt_objects         : Management network objects -> Low-Low (S6)
-#   infra_objects        : Infrastructure objects -> Low-Low (S6)
-#   admin_objects        : Admin-only policy objects -> Keep (S7)
-#   extra_temp_keywords  : Additional keywords for temporary rule detection
-#   severity_overrides   : Override severity for specific objects {name: 1-7}
+# CUSTOMER_RULES — customer_rules.json 에서 로드 (없으면 중립 기본값)
 # ================================================================
-def _load_customer_rules() -> dict:
-    default = {
-        "high_risk_objects":    [],
-        "user_segment_objects": [],
-        "mgmt_objects":         [],
-        "infra_objects":        [],
-        "admin_objects":        [],
-        "extra_temp_keywords":  [],
-        "severity_overrides":   {},
-    }
-    candidates = [
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "customer_rules.json"),
-        os.path.join(os.getcwd(), "customer_rules.json"),
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            try:
-                with open(path, encoding="utf-8") as f:
-                    data = json.load(f)
-                    default.update({k: v for k, v in data.items() if not k.startswith("_")})
-                    return default
-            except Exception:
-                pass
-    return default
-
-CUSTOMER_RULES = _load_customer_rules()
+CUSTOMER_RULES = load_customer_rules()
 # ================================================================
 
-# NIST SP 800-41 §3.3 — insecure/legacy protocols
-RISKY_SERVICES  = {"FTP", "TELNET", "TFTP", "RLOGIN", "RSH", "REXEC"}
-AD_DNS_SERVICES = {"AD_AUTH", "DNS", "LDAP", "Kerberos", "LDAPS", "LDAP_UDP"}
+RISKY_SERVICES  = {"FTP", "TELNET", "TFTP", "RLOGIN", "RSH"}
+AD_DNS_SERVICES = {"AD_AUTH", "DNS", "LDAP", "Kerberos", "LDAPS"}
 ICMP_SERVICES   = {"ALL_ICMP", "ICMP_ALL", "PING", "ALL_ICMP_ALL"}
-
-# General temporary/test rule keywords (language-neutral)
-BASE_TEMP_KW = [
-    "temp", "tmp", "test", "temporary", "trial", "poc", "pilot",
-    "migration", "backup", "old", "deprecated", "legacy",
-    "임시", "테스트", "작업", "이관",
-]
-CONTROLLED_KW = ["controlled"]
+CONTROLLED_KW   = ["controlled"]
 
 SEVERITY_META = {
-    0: ("Unknown",  "Set User IP ranges to enable full classification", "#F1EFE8"),
-    1: ("Critical", "Disable immediately",                              "#FFCCCC"),
-    2: ("High",     "Delete rule",                                      "#D3D1C7"),
-    3: ("Medium",   "Review required — disable or formalize",           "#FFE0B2"),
-    4: ("Medium",   "Review required — disable or formalize",           "#B5D4F4"),
-    5: ("Low",      "Keep + request change ticket",                     "#FFF9C4"),
-    6: ("Low",      "Keep + request change ticket",                     "#C0DD97"),
-    7: ("None",     "Keep rule",                                        "#9FE1CB"),
+    0: ("Unknown",  "Cannot assess — set User IP ranges first", "#F0EEE7"),
+    1: ("Critical", "Disable immediately",                      "#FFCCCC"),
+    2: ("High",     "Disable — review for deletion separately", "#D3D1C7"),
+    3: ("Medium",   "Review required",                          "#FFE0B2"),
+    4: ("Medium",   "Review required",                          "#B5D4F4"),
+    5: ("Low",      "Request ITS Ticket",                       "#FFF9C4"),
+    6: ("Low",      "Request ITS Ticket",                       "#C0DD97"),
+    7: ("None",     "Keep",                                     "#9FE1CB"),
 }
 
+# URGENCY_LABELS 호환성 유지
 URGENCY_LABELS = {k: v[0] for k, v in SEVERITY_META.items()}
 
 
@@ -81,19 +41,21 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
     today       = context.get("today") or date.today()
     svc_groups  = context.get("service_groups", {})
     user_ranges = context.get("user_ranges", [])
+    customer_rules = context.get("customer_rules")
+    if customer_rules is None:
+        customer_rules = CUSTOMER_RULES
 
-    name          = policy.get("name") or ""
-    action        = (policy.get("action") or "").lower()
-    status        = (policy.get("status") or "").lower()
-    schedule_val  = policy.get("schedule") or "always"
+    name         = policy.get("name") or ""
+    action       = (policy.get("action") or "").lower()
+    status       = (policy.get("status") or "").lower()
+    schedule_val = policy.get("schedule") or "always"
     hit_count_raw = policy.get("hit_count")
-    hit_count_known = hit_count_raw is not None
-    hit_count     = _int(hit_count_raw)
-    last_used     = _parse_date(policy.get("last_used"))
-    request_date  = _parse_date(policy.get("request_date"))
-    # Support both "ritm" (legacy) and "ticket" field names
-    ticket        = policy.get("ticket") or policy.get("ritm")
-    has_ticket    = bool(ticket)
+    hit_count_known = hit_count_raw is not None   # False = CSV 미로드
+    hit_count    = _int(hit_count_raw)
+    last_used    = _parse_date(policy.get("last_used"))
+    request_date = _parse_date(policy.get("request_date"))
+    ritm         = policy.get("ritm")
+    has_ritm     = bool(ritm)
 
     src_list = policy.get("srcaddr_display") or []
     dst_list = policy.get("dstaddr_display") or []
@@ -109,188 +71,179 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
     is_expired     = is_expired_schedule(schedule_val, today)
     is_always      = is_always_schedule(schedule_val)
     sched_date     = get_schedule_date(schedule_val)
-    all_temp_kw    = BASE_TEMP_KW + CUSTOMER_RULES.get("extra_temp_keywords", [])
+    all_temp_kw    = customer_rules.get("temp_keywords", []) + customer_rules.get("extra_temp_keywords", [])
     has_temp_kw    = any(kw.lower() in name.lower() for kw in all_temp_kw)
     has_controlled = any(kw.lower() in name.lower() for kw in CONTROLLED_KW)
 
     tags = _compute_tags(
         status, action, hit_count, hit_count_known, last_used, schedule_val,
-        name, ticket, expanded_svcs, today
+        name, ritm, expanded_svcs, today, all_temp_kw
     )
 
     def done(sev, reason):
-        risk, rec, color = SEVERITY_META.get(sev, ("Unknown", "", "#F1EFE8"))
+        risk, rec, color = SEVERITY_META.get(sev, ("Unknown", "", "#F0EEE7"))
         return {
             "urgency": sev, "risk_level": risk,
             "recommended_action": rec, "reason": reason,
             "traffic_type": traffic_type, "color": color, "tags": tags,
         }
 
-    # ── Customer overrides ──────────────────────────────────────
-    for obj, sev in CUSTOMER_RULES.get("severity_overrides", {}).items():
+    for obj, sev in customer_rules.get("severity_overrides", {}).items():
         if _in_obj(obj, name, src_list, dst_list):
-            return done(sev, f"Customer override: {obj} -> S{sev}")
+            return done(sev, f"Override: {obj} -> {sev}")
 
-    # ── S7 — Keep immediately ───────────────────────────────────
-    if action != "accept":
-        return done(7, f"Action = Deny ('{action}') — by design")
+    if action != "accept":   # "deny", "" 빈 값 모두 deny 정책으로 처리
+        return done(7, f"Action = Deny ('{action}')")
     if is_icmp_only:
-        return done(7, "ICMP-only service (diagnostic traffic)")
-    if has_ticket and not is_expired:
-        return done(7, f"Valid change ticket: {ticket}, schedule active")
+        return done(7, "Service = ICMP only")
+    # Disabled 정책은 유효 티켓/관리자/특례 객체 규칙보다 우선 → 항상 2 (Deny/ICMP-only는 예외적으로 그보다 먼저 7 처리)
+    if status in ("disabled", "disable"):
+        return done(2, "Status = Disabled")
+    if has_ritm and not is_expired:
+        return done(7, f"Valid ITS: {ritm}, Schedule valid")
     if is_any_all and has_controlled:
-        return done(7, "Any/All scope + 'controlled' keyword (multi-firewall policy)")
+        return done(7, "Any/All + 'controlled' keyword")
 
-    # Admin-designated policy objects -> always Keep
-    for obj in CUSTOMER_RULES.get("admin_objects", []):
+    # 관리자 객체(admin_objects) 정책 → Risky 여부 무관 유지
+    for obj in customer_rules.get("admin_objects", []):
         if _in_obj(obj, name, src_list, dst_list):
-            return done(7, f"Admin policy object: {obj}")
+            return done(7, f"Admin policy — keep ({obj})")
 
-    # ── S1 — Critical: disable immediately ─────────────────────
-    # Customer-designated high-risk objects
-    for obj in CUSTOMER_RULES.get("high_risk_objects", []):
+    for obj in customer_rules.get("high_risk_objects", []):
         if _in_obj(obj, name, src_list, dst_list):
-            return done(1, f"High-risk object (customer-defined): {obj}")
-
-    # NIST SP 800-41 §3.3: insecure/legacy protocols
+            return done(1, f"High-risk object: {obj}")
     if is_risky:
         found = set(expanded_svcs) & RISKY_SERVICES
         non_risky = [s for s in expanded_svcs if s and s not in RISKY_SERVICES]
-        is_mixed = bool(non_risky)
+        is_mixed = bool(non_risky)   # 위험 서비스 + 정상 서비스 혼합
+
         if is_mixed:
             if hit_count_known and hit_count > 0 and _within_yrs(last_used, today, 1):
-                result = done(3, f"Mixed risky+normal services, active use — remove risky ports: {', '.join(sorted(found))}")
-                result["recommended_action"] = f"Keep rule, remove insecure service(s): {', '.join(sorted(found))}"
+                # 혼합 + 활성 사용 → 위험 서비스 포트만 제거
+                result = done(3, f"Risky service mixed + active — remove: {', '.join(sorted(found))}")
+                result["recommended_action"] = f"Keep policy, remove risky services only ({', '.join(sorted(found))})"
                 return result
-            return done(1, f"Mixed risky+normal services, unused — remove risky ports: {', '.join(sorted(found))}")
-        return done(1, f"Insecure/legacy protocol (NIST SP 800-41): {', '.join(sorted(found))}")
+            return done(1, f"Risky service mixed + unused — remove: {', '.join(sorted(found))}")
+        return done(1, f"Risky service only: {', '.join(sorted(found))}")
 
-    # NIST: Least-privilege — overly permissive rules
-    src_dst_any   = _is_any(src_list) or _is_any(dst_list)
+    src_dst_any = _is_any(src_list) or _is_any(dst_list)
     all_three_any = _is_any(src_list) and _is_any(dst_list) and svc_any
 
     if src_dst_any:
         if is_ad_dns:
-            return done(6, "Source/destination Any/All + AD/DNS service")
+            return done(6, "Src/Dst Any·All + AD/DNS service")
         if all_three_any:
-            return done(1, "Source, destination, AND service all Any/All (violates least-privilege)")
+            return done(1, "Src, Dst, Service all Any·All")
         if hit_count_known and hit_count > 0 and _within_yrs(last_used, today, 1):
             if traffic_type == "Server-User":
-                return done(3, "Source/dest Any/All + active use (< 1yr) + Server-User")
+                return done(3, "Src/Dst Any·All + active (within 1yr) + S-U")
             if traffic_type == "Server-Server":
-                return done(4, "Source/dest Any/All + active use (< 1yr) + Server-Server")
-            return done(3, "Source/dest Any/All + active use (< 1yr)")
-        return done(1, "Source/dest Any/All + unused or long-idle (violates least-privilege)")
+                return done(4, "Src/Dst Any·All + active (within 1yr) + S-S")
+            return done(3, "Src/Dst Any·All + active (within 1yr)")
+        return done(1, "Src/Dst Any·All + unused or long inactive")
 
-    if svc_any:
+    if svc_any:   # 서비스만 ALL인 경우
         if is_ad_dns:
-            return done(6, "Service ALL + AD/DNS service")
+            return done(6, "Service ALL + AD/DNS")
         if hit_count_known and hit_count > 0 and _within_yrs(last_used, today, 1):
             if traffic_type == "Server-User":
-                return done(5, "Service ALL + active use (< 1yr) + Server-User")
+                return done(5, "Service ALL + active (within 1yr) + S-U")
             if traffic_type == "Server-Server":
-                return done(4, "Service ALL + active use (< 1yr) + Server-Server")
-            return done(3, "Service ALL + active use (< 1yr)")
-        return done(1, "Service ALL + unused or long-idle (violates least-privilege)")
-
-    # Temporary rule without change ticket (CIS Control 11)
-    if has_temp_kw and not has_ticket:
+                return done(4, "Service ALL + active (within 1yr) + S-S")
+            return done(3, "Service ALL + active (within 1yr)")
+        return done(1, "Service ALL + unused or long inactive")
+    if has_temp_kw and not has_ritm:
         if hit_count_known and hit_count > 0:
             if last_used and not _within_yrs(last_used, today, 1):
+                # Last Used >= 1yr
                 if not _within_yrs(last_used, today, 2):
-                    return done(2, "Temp rule, no ticket, last used > 2yr ago — delete")
+                    # Last Used >= 2yr → 삭제 후보
+                    return done(2, "Temp+NoTicket, Hit>0, Last Used >= 2yr")
+                # 1yr <= Last Used < 2yr → DT 검토
                 if traffic_type == "Server-User":
-                    return done(3, "Temp rule, no ticket, last used 1-2yr ago, Server-User")
-                return done(4, "Temp rule, no ticket, last used 1-2yr ago, Server-Server")
+                    return done(3, "Temp+NoTicket, Hit>0, Last Used 1~2yr, S-U")
+                return done(4, "Temp+NoTicket, Hit>0, Last Used 1~2yr, S-S")
+            # Last Used < 1yr 또는 미상 → ITS 요청
             if traffic_type == "Server-User":
-                return done(5, "Temp rule, no ticket, active use (< 1yr), Server-User")
-            return done(6, "Temp rule, no ticket, active use (< 1yr), Server-Server")
-        reason_sfx = "no CSV loaded" if not hit_count_known else "hit count = 0 (unused)"
-        return done(1, f"Temporary rule without change ticket ({reason_sfx})")
+                return done(5, "Temp+NoTicket, Hit>0, Last Used within 1yr, S-U")
+            return done(6, "Temp+NoTicket, Hit>0, Last Used within 1yr, S-S")
+        reason_sfx = "CSV Not Loaded" if not hit_count_known else "Hit=0 (Unused)"
+        return done(1, f"Temp+NoTicket, {reason_sfx}")
 
-    # ── S2 — High: delete rule ──────────────────────────────────
-    if status in ("disabled", "disable"):
-        return done(2, "Rule disabled — remove to reduce attack surface (NIST SP 800-41)")
     if is_expired:
-        return done(2, f"Schedule expired: {schedule_val} — rule no longer needed")
+        return done(2, f"Schedule expired: {schedule_val}")
 
-    # Zero-hit accept rules
     if hit_count_known and hit_count == 0 and action == "accept":
         age = _age(request_date, today)
         if traffic_type == "Server-User":
             if age is None or age >= 1:
-                return done(2, f"Zero-hit Server-User rule, age={_fmt(age)}yr — likely unused")
+                return done(2, f"Hit=0, Accept, Server-User, age={_fmt(age)}")
         elif traffic_type == "Server-Server":
             if age is None:
-                return done(4, "Zero-hit Server-Server rule, creation date unknown")
+                return done(4, "Hit=0, Accept, S-S, reg date unknown -> 4")
             if is_always:
                 if age > 1:
-                    return done(2, f"Zero-hit Server-Server, always-on, age={_fmt(age)}yr > 1yr")
+                    return done(2, f"Hit=0, Accept, S-S, always, age={_fmt(age)}yr > 1")
             else:
                 if sched_date:
                     sched_age = (today - sched_date).days / 365.25
                     if sched_age > 2:
-                        return done(4, f"Zero-hit Server-Server, schedule age={_fmt(sched_age)}yr > 2yr")
+                        return done(4, f"Hit=0, S-S, sched_age={_fmt(sched_age)}yr > 2 -> 4")
                     else:
-                        return done(6, f"Zero-hit Server-Server, schedule age={_fmt(sched_age)}yr <= 2yr")
+                        return done(6, f"Hit=0, S-S, sched_age={_fmt(sched_age)}yr <= 2 -> 6")
                 else:
                     if age > 1:
-                        return done(2, f"Zero-hit Server-Server, age={_fmt(age)}yr > 1yr")
+                        return done(2, f"Hit=0, S-S, age={_fmt(age)}yr > 1")
 
-    # ── Unknown traffic type ────────────────────────────────────
     if traffic_type == "Unknown":
-        return done(0, "Traffic type unknown — configure User IP ranges for full classification")
+        return done(0, "Unknown traffic type — set User IP ranges first")
 
-    # ── S3 — Medium-High: Server-User low utilization ───────────
     if traffic_type == "Server-User":
         age      = _age(request_date, today)
-        # Expected ~100 hits/year; configurable via severity_overrides
-        age_yrs  = age if age is not None else 3.0
-        threshold = max(int(age_yrs * 100), 50)
+        reg_year = request_date.year if request_date else 2021
+        threshold = (today.year - reg_year) * 100
         if hit_count_known and (age is None or age > 1) and hit_count < threshold:
+            # Last Used < 1yr → 최근 사용 중 → Severity 5 (ITS 요청)
             if _within_yrs(last_used, today, 1):
-                return done(5, f"Server-User low utilization (hit {hit_count} < {threshold}), active use < 1yr — request ticket")
-            return done(3, f"Server-User low utilization (hit {hit_count} < {threshold}), last used > 1yr")
+                return done(5, f"S-U, Low hit ({hit_count}<{threshold}) + Last Used within 1yr — ITS request")
+            return done(3, f"S-U, Hit {hit_count} < {threshold} ({today.year}-{reg_year}x100), Last Used > 1yr")
 
-    # ── S4 — Medium-Low: Server-Server low utilization ──────────
     if traffic_type == "Server-Server":
-        age     = _age(request_date, today)
-        eff_age = age if age is not None else 3.0
+        age      = _age(request_date, today)
+        eff_age  = age if age is not None else float(today.year - 2021)
         if hit_count_known and eff_age > 2 and hit_count < 50:
-            return done(4, f"Server-Server low utilization: age={_fmt(eff_age)}yr, hit count {hit_count} < 50")
+            return done(4, f"S-S, age={_fmt(eff_age)}yr, Hit {hit_count} < 50")
 
-    # ── S5 — Low-High ───────────────────────────────────────────
-    for obj in CUSTOMER_RULES.get("user_segment_objects", []):
+    for obj in customer_rules.get("user_segment_objects", []):
         if _in_obj(obj, name, src_list, dst_list):
-            return done(5, f"User segment object: {obj}")
+            return done(5, f"User-segment object: {obj}")
     if traffic_type == "Server-User":
         age = _age(request_date, today) or 0
-        if not has_ticket and age <= 1:
-            return done(5, "Server-User, within 1yr, no change ticket — formalize")
-        return done(5, "Server-User rule — request change ticket")
+        if not has_ritm and age <= 1:
+            return done(5, "S-U, within 1yr, No ticket ID")
+        return done(5, "S-U fallback")
 
-    # ── S6 — Low-Low ────────────────────────────────────────────
     if is_ad_dns and hit_count_known and hit_count > 0:
-        return done(6, "AD/DNS/LDAP service with active hit count")
-    for obj in CUSTOMER_RULES.get("infra_objects", []):
+        return done(6, "AD_AUTH or DNS, Hit > 0")
+    for obj in customer_rules.get("infra_objects", []):
         if _in_obj(obj, name, src_list, dst_list):
-            return done(6, f"Infrastructure object: {obj}")
-    for obj in CUSTOMER_RULES.get("mgmt_objects", []):
+            return done(6, f"Infra object: {obj}")
+    for obj in customer_rules.get("mgmt_objects", []):
         if _in_obj(obj, name, src_list, dst_list):
-            return done(6, f"Management network object: {obj}")
+            return done(6, f"Mgmt-segment object: {obj}")
     if traffic_type == "Server-Server":
         age = _age(request_date, today) or 0
-        if not has_ticket and age <= 2:
-            return done(6, "Server-Server, within 2yr, no change ticket — formalize")
+        if not has_ritm and age <= 2:
+            return done(6, "S-S, within 2yr, No ticket ID")
         if hit_count_known and hit_count >= 50:
-            return done(6, f"Server-Server, active rule (hit count {hit_count} >= 50)")
-        return done(6, "Server-Server rule — request change ticket")
+            return done(6, f"S-S, Hit {hit_count} >= 50")
+        return done(6, "S-S fallback")
 
-    return done(0, "Classification undetermined")
+    return done(0, "Cannot assess")
 
 
 def _compute_tags(status, action, hit_count, hit_count_known, last_used_dt,
-                  schedule_val, name, ticket, expanded_svcs, today) -> list:
+                  schedule_val, name, ritm, expanded_svcs, today, all_temp_kw) -> list:
     tags = []
     if status in ("disabled", "disable"):
         tags.append("Disabled")
@@ -300,14 +253,15 @@ def _compute_tags(status, action, hit_count, hit_count_known, last_used_dt,
         tags.append("Last Used > 1yr")
     if is_expired_schedule(schedule_val, today):
         tags.append("Expired Schedule")
-    if not ticket:
-        tags.append("No Change Ticket")
-    all_temp = BASE_TEMP_KW + CUSTOMER_RULES.get("extra_temp_keywords", [])
-    if any(kw.lower() in name.lower() for kw in all_temp):
+    if not name:
+        tags.append("No Name")
+    if not ritm:
+        tags.append("No Ticket")
+    if any(kw.lower() in name.lower() for kw in all_temp_kw):
         tags.append("Temp Rule")
     if set(expanded_svcs) & RISKY_SERVICES:
         tags.append("Risky Service")
-    if action != "accept":
+    if action != "accept":   # "deny", "" 빈 값 모두 Deny Rule 태그
         tags.append("Deny Rule")
     if bool(expanded_svcs) and set(expanded_svcs) <= ICMP_SERVICES:
         tags.append("ICMP Only")
@@ -315,10 +269,11 @@ def _compute_tags(status, action, hit_count, hit_count_known, last_used_dt,
 
 
 def _is_any(val) -> bool:
+    # "0.0.0.0/0": show full-configuration 추출 시 "all" 객체가 CIDR로 해석되는 경우
     if val is None:
         return True
     items = val if isinstance(val, list) else [val]
-    return any(str(v).lower().strip() in ("all", "any", "") for v in items)
+    return any(str(v).lower().strip() in ("all", "any", "", "0.0.0.0/0") for v in items)
 
 def _in_obj(obj: str, name: str, src, dst) -> bool:
     targets = [name] + (src or []) + (dst or [])
@@ -352,6 +307,7 @@ def _fmt(v) -> str:
     return f"{v:.1f}"
 
 def _parse_date(val):
+    """날짜/날짜시간 문자열 -> date. FortiGate GUI CSV의 다양한 형식 처리."""
     if not val:
         return None
     s = str(val).strip()
@@ -359,8 +315,10 @@ def _parse_date(val):
         return None
     from datetime import datetime
     for fmt in (
+        # FortiGate GUI CSV 실제 형식 (날짜+시간)
         "%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S",
         "%Y/%m/%d %H:%M",    "%Y-%m-%d %H:%M",
+        # 날짜만
         "%Y/%m/%d", "%Y-%m-%d", "%Y%m%d",
         "%d/%m/%Y", "%m/%d/%Y",
     ):

@@ -12,3 +12,6 @@ app/**/__pycache__/
 
 # 배포 바이너리는 GitHub Releases로만 배포한다 (git에 커밋하지 않는다)
 *.exe
+
+# 생성물: scripts/build_vuln_db.py 로 만들어지며 배포 exe에 번들된다 (6MB+)
+free/app/data/vuln_db.json

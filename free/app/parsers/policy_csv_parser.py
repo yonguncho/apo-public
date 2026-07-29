@@ -23,7 +23,8 @@ class PolicyStatsCsvParser:
             return {}
 
         text = text.lstrip("\ufeff")
-        reader = csv.DictReader(io.StringIO(text))
+        delimiter = self._sniff_delimiter(text)
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
         if not reader.fieldnames:
             return {}
 
@@ -106,6 +107,21 @@ class PolicyStatsCsvParser:
         if not header:
             return ""
         return str(row.get(header, "")).strip()
+
+    @staticmethod
+    def _sniff_delimiter(text: str) -> str:
+        """헤더 줄 기준으로 구분자를 추정. 콤마 고정 시 세미콜론/탭 CSV가 전멸하므로 방어."""
+        first_line = ""
+        for line in text.splitlines():
+            if line.strip():
+                first_line = line
+                break
+        best, best_count = ",", first_line.count(",")
+        for cand in (";", "\t", "|"):
+            c = first_line.count(cand)
+            if c > best_count:
+                best, best_count = cand, c
+        return best
 
     @staticmethod
     def _norm(value: str) -> str:

@@ -6,33 +6,25 @@ Anthropic API 미사용 — 완전 로컬 실행.
 """
 from __future__ import annotations
 import json
-import urllib.request
-import urllib.error
+import requests
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-DEFAULT_MODEL = "llama3.2:3b"
+DEFAULT_MODEL = "hermes3:latest"
 TIMEOUT_SEC = 120
 
 
 def _call_ollama(prompt: str, model: str = DEFAULT_MODEL) -> str:
-    body = json.dumps({
+    payload = {
         "model": model,
         "prompt": prompt,
         "stream": False,
         "options": {"temperature": 0.3, "num_predict": 1024},
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        OLLAMA_URL,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    }
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            return result.get("response", "").strip()
-    except urllib.error.URLError as e:
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=TIMEOUT_SEC)
+        resp.raise_for_status()
+        return resp.json().get("response", "").strip()
+    except requests.exceptions.RequestException as e:
         raise RuntimeError(f"Ollama 연결 실패: {e}") from e
 
 
@@ -97,13 +89,12 @@ Analysis:"""
 def check_ollama_available(model: str = DEFAULT_MODEL) -> bool:
     """Ollama 서버 및 모델 사용 가능 여부 확인."""
     try:
-        req = urllib.request.Request(
-            "http://localhost:11434/api/tags",
-            method="GET",
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            models = [m["name"] for m in data.get("models", [])]
-            return any(model.split(":")[0] in m for m in models)
-    except Exception:
+        resp = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if resp.status_code != 200:
+            return False
+        data = resp.json()
+        models = [m.get("name", "") for m in data.get("models", []) if isinstance(m, dict)]
+        models = [m for m in models if m]
+        return any(model.split(":")[0] in m for m in models)
+    except requests.exceptions.RequestException:
         return False

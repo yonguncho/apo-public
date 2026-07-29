@@ -173,11 +173,12 @@ from app.services.policy_renderer import build_view_model
 from app.services.workbook_exporter import build_workbook
 from datetime import date as _date
 from app.services.severity_engine import evaluate_severity
+from app.services.ai_analyzer import analyze_policies, analyze_single_policy, check_ollama_available
 from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v24-2026-05-06"
+APO_VERSION = "v63-2026-07-28"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -194,12 +195,26 @@ EXPORT_DIR = BASE_DIR / "exports"
 DATA_DIR = BASE_DIR / "data"
 
 
+def _license_required():
+    """라이선스 미보유 시 402 응답을 반환, 보유 시 None.
+    유료 Export 계열 라우트의 서버측 게이트 (클라이언트 게이트 우회 차단)."""
+    if not is_licensed():
+        return jsonify({"error": "License required. Please activate your Export license."}), 402
+    return None
+
+
 def create_app() -> Flask:
     app = Flask(
         __name__,
         template_folder=str(BASE_DIR / "app" / "templates"),
         static_folder=str(BASE_DIR / "app" / "static"),
     )
+
+    from datetime import datetime as _dt
+
+    @app.context_processor
+    def inject_year():
+        return {'current_year': _dt.now().year}
 
     for d in (IMPORT_DIR, EXPORT_DIR, DATA_DIR):
         d.mkdir(parents=True, exist_ok=True)
@@ -210,14 +225,10 @@ def create_app() -> Flask:
 
     @app.get("/version")
     def version():
-        templates_dir = BASE_DIR / "app" / "templates"
+        # 절대경로 등 내부 파일시스템 정보는 노출하지 않는다.
         return jsonify({
             "version": APO_VERSION,
             "frozen": bool(getattr(_sys, 'frozen', False)),
-            "base_dir": str(BASE_DIR),
-            "templates_dir": str(templates_dir),
-            "templates_exists": templates_dir.exists(),
-            "index_html_exists": (templates_dir / "index.html").exists(),
         })
 
     @app.post("/api/config/parse")
@@ -226,7 +237,8 @@ def create_app() -> Flask:
         if not uploaded:
             return jsonify({"error": "config_file is required"}), 400
 
-        filename = uploaded.filename or "fortigate.conf"
+        from werkzeug.utils import secure_filename
+        filename = secure_filename(uploaded.filename or "") or "fortigate.conf"
         save_path = IMPORT_DIR / filename
         uploaded.save(save_path)
 
@@ -239,6 +251,7 @@ def create_app() -> Flask:
         export_path = EXPORT_DIR / export_name
         export_path.write_text(json.dumps({"parsed": parsed, "view": view}, indent=2), encoding="utf-8")
         app.config['last_parsed'] = parsed
+        app.config['last_raw_config'] = raw      # Version Advisor 기능 감지용
         app.config['last_runtime_stats'] = {}   # 새 Config 로드 시 CSV stats 초기화
 
         return jsonify(
@@ -267,6 +280,10 @@ def create_app() -> Flask:
         if pasted_text.strip():
             stats = parser.parse_text(pasted_text)
             merged.update(stats)
+
+        existing = app.config.get('last_runtime_stats') or {}
+        existing.update(merged)
+        app.config['last_runtime_stats'] = existing
 
         return jsonify({"runtime_stats": merged})
 
@@ -309,16 +326,32 @@ def create_app() -> Flask:
 
     @app.post("/api/export/workbook")
     def export_workbook():
+        gate = _license_required()
+        if gate:
+            return gate
+        from werkzeug.utils import secure_filename
         payload = request.get_json(silent=True) or {}
         sheets = payload.get("sheets") or {}
-        workbook_name = payload.get("workbook_name", "firewall_policy_optimizer_export")
+        workbook_name = secure_filename(payload.get("workbook_name", "firewall_policy_optimizer_export")) or "firewall_policy_optimizer_export"
         output_path = EXPORT_DIR / f"{workbook_name}.xlsx"
-        build_workbook(output_path, sheets)
+        try:
+            build_workbook(output_path, sheets)
+        except Exception as exc:
+            print(f"[APO] workbook export failed: {exc}", flush=True)
+            return jsonify({"error": "Failed to build workbook export"}), 400
         return send_file(output_path, as_attachment=True, download_name=output_path.name)
 
     @app.get("/exports/<path:filename>")
     def download_export(filename: str):
-        return send_from_directory(EXPORT_DIR, filename, as_attachment=True)
+        from werkzeug.utils import secure_filename
+        safe_name = secure_filename(filename)
+        if not safe_name or safe_name != filename:
+            return jsonify({"error": "Invalid filename"}), 400
+        # 무료 산출물(파싱 결과 JSON)만 이 경로로 제공. 유료 산출물(.xlsx 등)은
+        # 라이선스 게이트가 걸린 전용 라우트로만 내려가야 하므로 여기서 차단.
+        if not safe_name.endswith(".parsed.json"):
+            return jsonify({"error": "Not available"}), 404
+        return send_from_directory(EXPORT_DIR, safe_name, as_attachment=True)
 
     @app.post("/api/config/diff")
     def api_config_diff():
@@ -338,7 +371,8 @@ def create_app() -> Flask:
             result = _compute_config_diff(old_data, new_data)
             return jsonify(result)
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            print(f"[APO] config diff failed: {exc}", flush=True)
+            return jsonify({"error": "Failed to compare configs. Check that both files are valid FortiGate configs."}), 500
 
     app.config.setdefault('user_ranges', [])
 
@@ -380,17 +414,179 @@ def create_app() -> Flask:
             "proxy":    classify_list(view.get("firewall_proxy_policy", [])),
         })
 
+    # ── AI 분석 (Ollama/hermes3 로컬) ──────────────────────────────────────
+    @app.get("/api/ai/status")
+    def ai_status():
+        available = check_ollama_available()
+        return jsonify({"available": available, "model": "hermes3:latest"})
+
+    @app.post("/api/ai/analyze")
+    def ai_analyze():
+        payload = request.get_json(silent=True) or {}
+        policies = payload.get("policies", [])
+        mode = payload.get("mode", "summary")   # "summary" | "single"
+        model = payload.get("model", "hermes3:latest")
+        try:
+            if mode == "single" and policies:
+                result = analyze_single_policy(policies[0], model)
+            else:
+                result = analyze_policies(policies, model)
+            return jsonify({"result": result, "model": model})
+        except RuntimeError as e:
+            return jsonify({"error": str(e)}), 503
 
     @app.post("/api/export/severity-workbook")
     def export_severity_workbook():
+        gate = _license_required()
+        if gate:
+            return gate
         from app.services.workbook_exporter import build_severity_workbook
         payload = request.get_json(silent=True) or {}
-        xlsx_bytes = build_severity_workbook(payload)
+        try:
+            xlsx_bytes = build_severity_workbook(payload)
+        except Exception as exc:
+            print(f"[APO] severity workbook export failed: {exc}", flush=True)
+            return jsonify({"error": "Failed to build severity export"}), 400
         return app.response_class(
             response=xlsx_bytes,
             status=200,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={"Content-Disposition": "attachment; filename=severity_export.xlsx"}
+        )
+
+    # ── Version Advisor ────────────────────────────────────────────────────
+    @app.get("/api/version-advisor")
+    def version_advisor():
+        from app.services.version_advisor import run_advisor
+        parsed = app.config.get('last_parsed')
+        if not parsed:
+            return jsonify({"error": "No config loaded. Upload a config file first."}), 400
+        meta = parsed.get("meta", {})
+        raw_config = app.config.get('last_raw_config', '')
+        result = run_advisor(meta, raw_config)
+        return jsonify(result)
+
+    # ── Remediation ───────────────────────────────────────────────────────
+    app.config.setdefault('remediation_device', {})
+
+    @app.post("/api/remediation/device")
+    def remediation_device_save():
+        payload = request.get_json(silent=True) or {}
+        try:
+            port = int(payload.get("port", 443) or 443)
+        except (TypeError, ValueError):
+            return jsonify({"error": "port must be a number"}), 400
+        if not (1 <= port <= 65535):
+            return jsonify({"error": "port out of range"}), 400
+        device = {
+            "ip":         str(payload.get("ip", "")).strip(),
+            "port":       port,
+            "token":      str(payload.get("token", "")).strip(),
+            "vdom":       str(payload.get("vdom", "root")).strip() or "root",
+            "verify_ssl": bool(payload.get("verify_ssl", False)),
+        }
+        if not device["ip"] or not device["token"]:
+            return jsonify({"error": "ip and token are required"}), 400
+        app.config['remediation_device'] = device
+        return jsonify({"ok": True})
+
+    @app.get("/api/remediation/device/test")
+    def remediation_device_test():
+        from app.services.remediation_service import test_connection
+        device = app.config.get('remediation_device', {})
+        if not device.get("ip"):
+            return jsonify({"ok": False, "message": "No device registered"}), 400
+        return jsonify(test_connection(device))
+
+    @app.get("/api/remediation/candidates")
+    def remediation_candidates():
+        from app.services.remediation_service import get_candidates
+        from app.services.severity_engine import evaluate_severity
+        from app.services.policy_renderer import build_view_model
+        parsed = app.config.get('last_parsed')
+        if not parsed:
+            return jsonify({"error": "No config loaded. Upload a config file first."}), 400
+        service_groups = parsed.get("service_groups", {})
+        user_ranges = app.config.get('user_ranges', [])
+        context = {
+            "service_groups": service_groups,
+            "user_ranges": user_ranges,
+            "today": _date.today(),
+        }
+        runtime_stats = app.config.get('last_runtime_stats', {})
+        view = build_view_model(parsed, runtime_stats)
+        def classify(policies):
+            return [{**p, **evaluate_severity(p, context)} for p in (policies or [])]
+        fw_classified  = classify(view.get("firewall_policy", []))
+        prx_classified = classify(view.get("firewall_proxy_policy", []))
+        severity_results = {"firewall": fw_classified, "proxy": prx_classified}
+
+        # Severity 탭과 동일한 urgency 분포 계산 → 카운트 불일치 디버그용
+        all_classified = fw_classified + prx_classified
+        urgency_dist = {}
+        for p in all_classified:
+            u = p.get("urgency", 0)
+            urgency_dist[str(u)] = urgency_dist.get(str(u), 0) + 1
+
+        candidates = get_candidates(parsed, severity_results)
+        candidates["_debug"] = {
+            "total_policies": len(all_classified),
+            "urgency_distribution": urgency_dist,
+            "critical_high_total": urgency_dist.get("1", 0) + urgency_dist.get("2", 0),
+        }
+        return jsonify(candidates)
+
+    @app.post("/api/remediation/apply")
+    def remediation_apply():
+        from app.services.remediation_service import disable_policies
+        device = app.config.get('remediation_device', {})
+        if not device.get("ip"):
+            return jsonify({"error": "No device registered"}), 400
+        payload = request.get_json(silent=True) or {}
+        policies = payload.get("policies", [])
+        if not policies:
+            return jsonify({"error": "No policies selected"}), 400
+        results = disable_policies(device, policies)
+        return jsonify({"results": results})
+
+    @app.post("/api/remediation/export/postman")
+    def remediation_export_postman():
+        gate = _license_required()
+        if gate:
+            return gate
+        from app.services.remediation_service import export_postman
+        from io import BytesIO
+        device = app.config.get('remediation_device', {})
+        payload = request.get_json(silent=True) or {}
+        policies = payload.get("policies", [])
+        json_str = export_postman(policies, device)
+        buf = BytesIO(json_str.encode("utf-8"))
+        today = _date.today().isoformat()
+        return app.response_class(
+            response=buf.read(),
+            status=200,
+            mimetype="application/json",
+            headers={"Content-Disposition": f"attachment; filename=apo_remediation_{today}.postman_collection.json"},
+        )
+
+    @app.post("/api/remediation/export/csv")
+    def remediation_export_csv():
+        gate = _license_required()
+        if gate:
+            return gate
+        from app.services.remediation_service import export_csv
+        from io import BytesIO
+        payload = request.get_json(silent=True) or {}
+        csv_bytes = export_csv(
+            payload.get("to_disable", []),
+            payload.get("already_disabled", []),
+        )
+        today = _date.today().isoformat()
+        return app.response_class(
+            response=csv_bytes,
+            status=200,
+            mimetype="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename=apo_remediation_{today}.csv"},
         )
 
     # ── License ────────────────────────────────────────────────────────────

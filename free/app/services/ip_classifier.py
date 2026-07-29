@@ -14,7 +14,9 @@ def classify_ip(addr_list, user_ranges: list) -> str:
             ip = ipaddress.ip_network(str(addr).strip(), strict=False)
             for entry in user_ranges:
                 net = ipaddress.ip_network(entry["cidr"], strict=False)
-                if ip.overlaps(net):
+                # 주소가 User 대역에 '포함'될 때만 User로 분류.
+                # overlaps는 0.0.0.0/0 같은 광대역도 User로 오분류하므로 subnet_of 사용.
+                if ip.version == net.version and ip.subnet_of(net):
                     return "User"
         except Exception:
             continue

@@ -46,8 +46,10 @@ class RuntimeStatsParser:
         lines = text.splitlines()
         blocks: list[list[str]] = []
         current: list[str] = []
+        found_idx = False
         for line in lines:
             if re.match(r"^idx\s*:\s*\d+", line.strip(), re.IGNORECASE):
+                found_idx = True
                 if current:
                     blocks.append(current)
                 current = [line]
@@ -56,7 +58,9 @@ class RuntimeStatsParser:
         if current:
             blocks.append(current)
         cleaned = ["\n".join(b).strip() for b in blocks if "\n".join(b).strip()]
-        if len(cleaned) <= 1:
+        # idx: 블록을 하나라도 찾았으면(단 1개여도) 그대로 사용.
+        # idx: 라인이 전혀 없을 때만 빈 줄 기준 폴백 분할을 쓴다.
+        if not found_idx:
             return [b.strip() for b in re.split(r"\n\s*\n+", text) if b.strip()]
         return cleaned
 
