@@ -24,11 +24,22 @@ from pathlib import Path
 
 from ._license_pubkey import E as _PUB_E, N as _PUB_N
 
-# 구형 HMAC 키 수용 여부. 기존 판매분 호환을 위해 현재는 켜 둔다.
-_LEGACY_HMAC_ENABLED = True
+# 구형 HMAC 대칭키는 배포 빌드에만 포함되는 별도 모듈에서 읽는다.
+# 공개 소스 트리에는 이 모듈이 없으므로 구형 키 경로가 자동으로 꺼진다.
+# (대칭키는 EXE에 내장돼 추출이 가능하다는 성질 자체는 변하지 않는다. 다만
+#  공개 저장소에서 grep 한 번으로 얻어지는 상태는 피한다.)
+try:
+    from ._license_legacy_secret import SECRET_HEX as _LEGACY_SECRET_HEX
+    _SECRET_KEY = bytes.fromhex(_LEGACY_SECRET_HEX)
+except ImportError:
+    _SECRET_KEY = None
 
-# 구형 HMAC 비밀키 (EXE 내장 — 추출 가능하므로 신규 발급에는 쓰지 않는다)
-_SECRET_KEY = bytes.fromhex('8ec1b65000e416bd062663416f231e683fb809f66e0e5ddfd8decf35e73808cf')
+# 구형 HMAC 키 수용 여부. 기존 판매분 호환을 위해 켜 두지만, 대칭키가 없으면
+# 어차피 검증할 수 없으므로 함께 꺼진다.
+# TODO: 구형 APO- 키 사용자가 모두 APO2-로 교체되면 이 경로를 완전히 제거한다.
+#       그때까지는 대칭키를 추출한 공격자가 APO- 키를 위조할 수 있어,
+#       RSA 전환의 이득이 이 플래그만큼 상쇄된다.
+_LEGACY_HMAC_ENABLED = _SECRET_KEY is not None
 
 # EMSA-PKCS1-v1_5 의 SHA-256 DigestInfo 접두 (RFC 8017 §9.2)
 _SHA256_DIGEST_INFO = bytes.fromhex('3031300d060960864801650304020105000420')
