@@ -61,7 +61,7 @@ def _add_sheet(wb: Workbook, title: str, headers: list[str], rows: list[list[Any
 
     for row_idx, row in enumerate(rows, start=2):
         for col_idx, value in enumerate(row, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=_stringify(value))
+            cell = write_text_cell(ws, row_idx, col_idx, _stringify(value))
             cell.alignment = Alignment(vertical='top', wrap_text=True)
 
     if headers and rows:
@@ -98,6 +98,45 @@ def _stringify(value: Any) -> Any:
     if isinstance(value, dict):
         return str(value)
     return value
+
+
+# 스프레드시트가 수식으로 해석하는 선두 문자.
+# 리포트에 들어가는 값(정책명·주석·주소 객체명 등)은 전부 분석 대상 config에서
+# 온 것이라 신뢰할 수 없다. 예: 정책명이 "=cmd|'/C calc'!A1" 이면 openpyxl이
+# 이를 실제 수식 셀로 저장하고, 분석가가 파일을 열 때 DDE가 실행된다.
+FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def is_formula_like(value: Any) -> bool:
+    """수식으로 해석될 수 있는 값인지.
+
+    선두 문자만 보고 전부 막으면 오탐이 크다. 실제로 이 리포트에는
+    last_used="-" 같은 '데이터 없음' 표시가 1500건 넘게 들어가는데, 그것까지
+    중화하면 리포트가 지저분해지고 값이 왜곡된다. 단독 기호와 순수 숫자는
+    스프레드시트가 수식으로 실행할 수 없으므로 그대로 둔다.
+    """
+    if not isinstance(value, str) or not value.startswith(FORMULA_TRIGGERS):
+        return False
+    if len(value) == 1:          # "-", "@" 같은 단독 기호
+        return False
+    try:
+        float(value)             # "-5", "+3.2" 같은 순수 숫자
+        return False
+    except ValueError:
+        return True
+
+
+def write_text_cell(ws, row: int, column: int, value: Any):
+    """셀에 값을 쓰되, 수식으로 해석될 값은 문자열로 강제한다.
+
+    아포스트로피를 덧붙이는 흔한 방식 대신 data_type을 문자열로 고정한다.
+    화면에 보이는 값이 원본 그대로 유지돼야 리포트가 왜곡되지 않기 때문이다.
+    (저장·재로드 후에도 data_type='s'가 유지되는 것을 확인했다.)
+    """
+    cell = ws.cell(row=row, column=column, value=value)
+    if is_formula_like(value):
+        cell.data_type = "s"
+    return cell
 
 
 from io import BytesIO
@@ -160,7 +199,7 @@ def build_severity_workbook(result: dict) -> bytes:
                 val = p.get(field, "")
                 if isinstance(val, list):
                     val = ", ".join(str(v) for v in val)
-                cell = ws.cell(row=row_idx, column=col_idx, value=str(val) if val else "")
+                cell = write_text_cell(ws, row_idx, col_idx, str(val) if val else "")
                 cell.fill = fill
         for col in ws.columns:
             max_len = max((len(str(c.value or "")) for c in col), default=10)

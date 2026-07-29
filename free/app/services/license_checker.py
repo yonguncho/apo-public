@@ -18,6 +18,7 @@ import hmac
 import json
 import os
 import sys
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from ._license_pubkey import E as _PUB_E, N as _PUB_N
@@ -50,6 +51,35 @@ def _machine_id() -> str:
     import uuid
     node = uuid.getnode()
     return hashlib.sha256(str(node).encode()).hexdigest()[:16]
+
+
+# NTP 보정·시간대 변경 같은 정상적인 소폭 되감기까지 막으면 오탐이 난다.
+# 만료 우회에 의미 있는 폭은 아니므로 며칠은 허용한다.
+_CLOCK_GRACE = timedelta(days=2)
+
+
+def _high_water_path() -> Path:
+    return _license_path().with_suffix('.state')
+
+
+def _read_high_water():
+    """지금까지 관측한 가장 늦은 날짜. 없거나 손상되면 None."""
+    try:
+        raw = _high_water_path().read_text(encoding='utf-8').strip()
+        return datetime.strptime(raw, '%Y-%m-%d').date()
+    except Exception:
+        return None
+
+
+def _update_high_water(today) -> None:
+    """앞으로만 전진시킨다. 쓰기 실패는 무시한다(읽기 전용 매체 등)."""
+    prev = _read_high_water()
+    if prev and prev >= today:
+        return
+    try:
+        _high_water_path().write_text(today.isoformat(), encoding='utf-8')
+    except OSError:
+        pass
 
 
 def _license_path() -> Path:
@@ -91,13 +121,21 @@ def verify_key(key: str) -> dict:
         # 만료 검증: exp 필드가 있는 키에만 적용 (기존 perpetual 키는 exp 없음 → 하위호환)
         exp = payload.get('exp')
         if exp:
-            from datetime import date, datetime
             try:
                 exp_date = datetime.strptime(str(exp), '%Y-%m-%d').date()
             except ValueError:
                 exp_date = None
-            if exp_date and date.today() > exp_date:
-                raise ValueError('License expired')
+            if exp_date:
+                today = date.today()
+                # 오프라인 검증이라 시계를 그대로 믿으면 만료된 키도 날짜를
+                # 되돌리는 것만으로 되살아난다. 지금까지 본 가장 늦은 날짜를
+                # 기록해 두고, 그보다 뒤로 돌아간 흔적이 있으면 거부한다.
+                last_seen = _read_high_water()
+                if last_seen and today < last_seen - _CLOCK_GRACE:
+                    raise ValueError('System clock inconsistency detected')
+                if today > exp_date:
+                    raise ValueError('License expired')
+                _update_high_water(today)
 
         # 기기 바인딩 검증: machine 필드가 있는 키에만 적용 (하위호환)
         machine = payload.get('machine')

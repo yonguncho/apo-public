@@ -15,6 +15,8 @@ from urllib.parse import quote
 
 import requests
 
+from app.services.workbook_exporter import is_formula_like
+
 # urgency 1 = Critical / urgency 2 = High (severity_engine.py 기준)
 _DISABLE_URGENCIES = {1, 2}
 
@@ -285,6 +287,18 @@ def export_postman(policies: list[dict], device: dict) -> str:
     return json.dumps(collection, ensure_ascii=False, indent=2)
 
 
+def _csv_safe(value) -> str:
+    """CSV 수식 인젝션 방어.
+
+    정책명·사유 등은 분석 대상 config에서 온 값이라 신뢰할 수 없다. Excel은
+    CSV를 열 때 =, +, -, @ 로 시작하는 셀을 수식으로 해석하므로, 그대로 쓰면
+    리포트를 여는 담당자 PC에서 DDE 실행이나 데이터 유출이 일어날 수 있다.
+    xlsx와 달리 CSV에는 셀 타입 개념이 없어 아포스트로피 접두로 무력화한다.
+    """
+    s = "" if value is None else str(value)
+    return "'" + s if is_formula_like(s) else s
+
+
 def export_csv(to_disable: list[dict], already_disabled: list[dict]) -> bytes:
     """UTF-8 BOM CSV 바이트 반환 (Excel 한글 호환)."""
     output = io.StringIO()
@@ -295,30 +309,17 @@ def export_csv(to_disable: list[dict], already_disabled: list[dict]) -> bytes:
         "Service", "Schedule", "Reason",
     ])
 
+    def row(category: str, p: dict) -> list:
+        return [category] + [
+            _csv_safe(p.get(f, ""))
+            for f in ("policy_id", "name", "risk_level", "srcaddr",
+                      "dstaddr", "service", "schedule", "reason")
+        ]
+
     for p in to_disable:
-        writer.writerow([
-            "Disable Candidate",
-            p.get("policy_id", ""),
-            p.get("name", ""),
-            p.get("risk_level", ""),
-            p.get("srcaddr", ""),
-            p.get("dstaddr", ""),
-            p.get("service", ""),
-            p.get("schedule", ""),
-            p.get("reason", ""),
-        ])
+        writer.writerow(row("Disable Candidate", p))
 
     for p in already_disabled:
-        writer.writerow([
-            "Already Disabled",
-            p.get("policy_id", ""),
-            p.get("name", ""),
-            p.get("risk_level", ""),
-            p.get("srcaddr", ""),
-            p.get("dstaddr", ""),
-            p.get("service", ""),
-            p.get("schedule", ""),
-            p.get("reason", ""),
-        ])
+        writer.writerow(row("Already Disabled", p))
 
     return ("﻿" + output.getvalue()).encode("utf-8")
