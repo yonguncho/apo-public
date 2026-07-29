@@ -461,7 +461,10 @@ function isExpiredSchedulePolicy(item) {
   const mm = Number(raw.slice(2, 4));
   const dd = Number(raw.slice(4, 6));
   if (!mm || !dd) return false;
-  const fullYear = yy >= 70 ? 1900 + yy : 2000 + yy;
+  // 서버(schedule_utils.py)와 동일하게 항상 20xx로 읽는다. 이 필드는 만료일이라
+  // 1970~1999년 값이 설정될 일이 없다. 예전 코드는 70 이상을 19xx로 읽어,
+  // 같은 정책을 서버는 미만료·클라이언트는 만료로 정반대 판정했다.
+  const fullYear = 2000 + yy;
   const scheduleDate = new Date(fullYear, mm - 1, dd, 23, 59, 59, 999);
   return !Number.isNaN(scheduleDate.getTime()) && scheduleDate < new Date();
 }

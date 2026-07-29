@@ -1,0 +1,127 @@
+# APO 기본 프로파일 — 중립 기본값
+#
+# 이 파일은 조직 고유 설정이 하나도 없는 상태를 나타낸다. 그대로 쓰면 APO는
+# FortiGate 설정에서 읽을 수 있는 객관적 사실과, 공개 표준에 근거가 있는
+# 규칙만으로 판정한다.
+#
+# 조직 고유 값(예외 객체 목록, 티켓 ID 패턴 등)은 여기 두지 않는다. 비어 있는
+# 항목은 해당 판정을 건너뛰고 리포트에 "N/A (해당 체계 미사용)"으로 표기한다.
+# 데이터가 없는 것을 위험으로 오판하지 않기 위해서다.
+#
+# 각 규칙의 분류 근거와 표준 인용은 docs/inventory.md 참조.
+
+meta:
+  name: default
+  description: 표준 근거 기반 중립 기본값
+
+thresholds:
+  # ── 주의 ────────────────────────────────────────────────────────────────
+  # 조사한 어떤 표준에도 "룰이 며칠 미사용이면 노후"라는 숫자 기준이 없다.
+  # NIST SP 800-41 r1은 "정기적으로 검토하라"까지만 말하고(S5), PCI-DSS v4.0
+  # Req 1.2.7은 검토 *주기* 6개월을 정할 뿐 개별 룰의 임계값을 정하지 않는다.
+  # 아래 값은 표준 요구가 아니라 APO의 기본 제안치이며, 조직이 조정해야 한다.
+  # ────────────────────────────────────────────────────────────────────────
+
+  # 최종 사용 이후 이 기간을 넘으면 '사용 중단 추정'.
+  # 365일인 이유: 연말 정산·연간 배치처럼 1년에 한 번 도는 정책을 오탐하지
+  # 않기 위해서다. 6개월로 잡으면 이런 정책이 매번 정리 대상으로 잡힌다.
+  dormancy_days: 365
+
+  # 이 기간을 넘으면 '장기 미사용'.
+  long_dormancy_days: 730
+
+  # 절대 hit 수 기준 사용 여부.
+  # 기본 false인 이유는 두 가지다.
+  #   1) 절대 수치는 트래픽 볼륨을 가정한다. 저트래픽 세그먼트의 정상 정책이
+  #      고트래픽 기준으로 재단된다.
+  #   2) hit 카운터는 방화벽 재부팅·HA 페일오버로 리셋된다. 즉 낮은 수치가
+  #      미사용의 증거가 되지 못한다.
+  # 대신 hit==0(미사용)과 last_used 경과(사용 중단)만으로 판정한다.
+  use_absolute_hit_threshold: false
+  su_hit_multiplier: null
+  ss_hit_threshold: null
+
+  # 스케줄 기반 나이 분기(년).
+  ss_schedule_age_years: 2
+
+  # 정책명에 등록일이 없을 때 가정할 연도.
+  # null인 이유: 고정 연도를 두면 (올해 - 폴백연도) 계산이 해마다 커져서,
+  # 같은 정책이 코드 변경 없이 매년 더 쉽게 정리 대상으로 떨어진다.
+  # 등록일을 모르면 모르는 대로 두고 해당 판정을 건너뛴다.
+  registration_fallback_year: null
+
+services:
+  # 평문 전송 프로토콜.
+  # 근거 S7 — NIST SP 800-82r3, OT 취약점 항목 "Standard, well-documented
+  # communication protocols are used in plaintext": telnet, FTP, HTTP, NFS를
+  # 명시한다. 단 이는 OT 문맥이며 모든 환경에 대한 일반 금지는 아니다.
+  #
+  # HTTP·NFS는 표준에 명시돼 있으나 기본 목록에서 뺐다. 사내 웹서비스가
+  # 광범위하게 HTTP를 쓰는 환경에서 전부 Critical로 잡으면 오탐이 폭발해
+  # 리포트를 못 쓰게 된다. OT 환경이라면 아래에 추가할 것.
+  risky:
+    - FTP
+    - TELNET
+    - TFTP
+    - RLOGIN
+    - RSH
+
+  # 인증·이름해석 서비스. 광범위 허용이라도 위험도를 낮춰 보는 예외군.
+  auth_dns:
+    - AD_AUTH
+    - DNS
+    - LDAP
+    - Kerberos
+    - LDAPS
+
+  icmp:
+    - ALL_ICMP
+    - ICMP_ALL
+    - PING
+    - ALL_ICMP_ALL
+
+rules:
+  # ICMP 전용 정책을 판정 대상에서 빼고 Keep으로 둘 것인가.
+  # 근거 S3 — NIST SP 800-41 r1 §4.1.4는 양면적이다. "ICMP is needed for many
+  # useful things"이고 전면 차단은 진단·성능 문제를 일으키지만, "firewalls at
+  # the network perimeter should deny all incoming and outgoing ICMP traffic
+  # except for those types and codes specifically permitted"라고도 한다.
+  # 즉 내부 방화벽에서는 타당하고 경계 방화벽에서는 어긋난다. 조건부이므로
+  # 기본은 끈다. 내부 방화벽을 분석한다면 true로 둘 것.
+  icmp_only_is_keep: false
+
+objects:
+  # 조직 고유 예외 객체. 비어 있으면 해당 판정을 건너뛴다.
+  # 여기에 값을 넣지 않는 한 'ADMIN', 'Internal' 같은 흔한 객체명이 특별
+  # 취급되지 않는다 — 이게 깨지면 타 조직의 분석 결과가 조용히 왜곡된다.
+  high_risk: []        # 항상 Critical로 볼 객체
+  user_segment: []     # 사용자 세그먼트 (예: VDI 풀)
+  mgmt: []             # 관리망
+  infra: []            # 인프라
+  admin: []            # 관리자 전용 정책 → 유지
+  severity_overrides: {}   # {객체명: 등급(0~7)}
+
+naming:
+  # 정책명에서 ITSM 티켓 ID를 뽑는 정규식.
+  # null이면 티켓 ID 추출을 아예 건너뛴다. 부정확한 패턴으로 잘못 매칭하느니
+  # "티켓 체계 미사용"으로 두는 편이 안전하다.
+  # 예) ServiceNow: 'RITM\d+'   Jira: '[A-Z]+-\d+'
+  ticket_id_pattern: null
+
+  # 임시 정책 판단 키워드. 특정 조직 용어가 아닌 범용 표현만 둔다.
+  temp_keywords:
+    - Temp
+    - temp
+    - test
+    - 테스트
+    - 작업
+    - 임시
+    - migration
+    - backup
+    - old
+
+  # 조직 고유 임시 키워드는 여기에 추가한다.
+  extra_temp_keywords: []
+
+  controlled_keywords:
+    - controlled

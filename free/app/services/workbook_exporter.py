@@ -155,6 +155,9 @@ SEVERITY_FILLS = {
 SEVERITY_COLS = [
     ("urgency",             "Severity"),
     ("risk_level",          "Risk Level"),
+    # 등급(위험도)과 조치(무엇을 할 것인가)는 다른 축이다. 등급만으로 정렬하면
+    # 성격이 다른 작업이 섞이므로 조치 유형을 별도 컬럼으로 낸다.
+    ("action_label",        "Action"),
     ("recommended_action",  "Recommended Action"),
     ("reason",              "Reason"),
     ("traffic_type",        "Traffic Type"),
@@ -206,7 +209,67 @@ def build_severity_workbook(result: dict) -> bytes:
             ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
         ws.freeze_panes = "A2"
 
+    _add_notes_sheet(wb, result)
+
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+def _add_notes_sheet(wb: Workbook, result: dict) -> None:
+    """리포트를 읽기 전에 알아야 할 것들을 첫 시트로 넣는다.
+
+    판정 결과만 주고 한계를 말하지 않으면, 읽는 사람이 수치를 실제보다 확정적인
+    것으로 받아들인다. 특히 Hit Count는 장비 재시작으로 초기화되므로 '낮음'이
+    '미사용'을 뜻하지 않는다.
+    """
+    from app.services.severity_engine import KNOWN_LIMITATIONS
+
+    ws = wb.create_sheet("Notes", 0)
+    title_font = Font(bold=True, size=12)
+    head_font = Font(bold=True)
+
+    r = 1
+    ws.cell(row=r, column=1, value="APO Analysis Report — Read This First").font = title_font
+    r += 2
+
+    ws.cell(row=r, column=1, value="Limitations of this report").font = head_font
+    r += 1
+    for item in KNOWN_LIMITATIONS:
+        c = write_text_cell(ws, r, 1, f"• {item}")
+        c.alignment = Alignment(vertical="top", wrap_text=True)
+        r += 1
+    r += 1
+
+    inactive = result.get("inactive_rules") or []
+    if inactive:
+        ws.cell(row=r, column=1, value="Checks not applied in this analysis").font = head_font
+        r += 1
+        for item in inactive:
+            c = write_text_cell(
+                ws, r, 1,
+                f"• {item.get('item')} — {item.get('reason')} {item.get('effect')}")
+            c.alignment = Alignment(vertical="top", wrap_text=True)
+            r += 1
+        r += 1
+
+    ws.cell(row=r, column=1, value="What the Action column means").font = head_font
+    r += 1
+    for label, desc in (
+        ("Disable now",            "Disable this policy now."),
+        ("Review candidate",       "Candidate for removal — confirm first. Already disabled or past its expiry date."),
+        ("Disable & monitor",      "Disable first, watch for 30–90 days, then decide whether to remove."),
+        ("Remove service only",    "Keep the policy; remove only the flagged service from it."),
+        ("Needs review",           "Needs a closer look before deciding."),
+        ("Register ticket",        "Keep the policy, but register it through your approval process."),
+        ("No risk",                "Assessed and found not to be a risk (deny rules, ICMP-only, and similar)."),
+        ("Not assessed (exempted)", "An exception rule stopped this policy from being assessed. This does NOT mean it is safe."),
+        ("Cannot assess",          "Not enough information to judge."),
+    ):
+        write_text_cell(ws, r, 1, label)
+        write_text_cell(ws, r, 2, desc)
+        r += 1
+
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 100
