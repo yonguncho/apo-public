@@ -258,7 +258,18 @@ def _add_summary_sheet(wb: Workbook, result: dict) -> None:
 
     r = 1
     ws.cell(row=r, column=1, value="APO Policy Analysis Report").font = title_font
-    r += 2
+    r += 1
+    branding = rm.get("branding") or {}
+    if branding.get("company"):
+        # MSP·컨설턴트 티어 화이트라벨. write_text_cell을 쓰는 이유:
+        # 회사명도 사용자 입력이라 수식 인젝션 중화가 필요하다.
+        line = f"Prepared by {branding['company']}"
+        if branding.get("prepared_for"):
+            line += f" for {branding['prepared_for']}"
+        c = write_text_cell(ws, r, 1, line)
+        c.font = Font(bold=True, size=11)
+        r += 1
+    r += 1
 
     ws.cell(row=r, column=1, value="Document").font = head_font
     r += 1

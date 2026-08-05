@@ -180,7 +180,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v76-2026-08-05"
+APO_VERSION = "v77-2026-08-05"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -593,6 +593,10 @@ def create_app() -> Flask:
             "user_range_count": len(app.config.get('user_ranges', [])),
             "csv_loaded": bool(app.config.get('last_runtime_stats')),
         }
+        if _branding_allowed():
+            b = _load_branding()
+            if b.get("company"):
+                payload["report_meta"]["branding"] = b
         try:
             xlsx_bytes = build_severity_workbook(payload)
         except Exception as exc:
@@ -849,8 +853,60 @@ def create_app() -> Flask:
     def license_status():
         info = get_license_info()
         if info:
-            return jsonify({"licensed": True, "email": info.get("email"), "issued": info.get("issued")})
+            return jsonify({"licensed": True, "email": info.get("email"),
+                            "issued": info.get("issued"),
+                            # 기존 키에는 tier가 없다 → 단일 조직으로 간주(하위호환)
+                            "tier": info.get("tier") or "single"})
         return jsonify({"licensed": False})
+
+    # ── 화이트라벨 브랜딩 (MSP·컨설턴트 티어 전용) ─────────────────────────
+    # 컨설턴트는 고객사에 제출하는 보고서에 자기 회사명을 실어야 한다.
+    # 단일 조직 티어와의 실질 구분점이므로 서버측에서 티어를 강제한다.
+    # frozen exe에서 DATA_DIR는 _MEIPASS(매 실행 새로 추출·종료 시 삭제) 하위라
+    # 여기 쓰면 브랜딩이 재시작마다 사라진다(재비판 NEW-BUG). 라이선스 파일과
+    # 같은 원칙으로 exe 인접 경로에 영속한다.
+    if getattr(_sys, 'frozen', False):
+        _BRANDING_FILE = Path(_sys.executable).parent / "branding.json"
+    else:
+        _BRANDING_FILE = DATA_DIR / "branding.json"
+
+    def _load_branding() -> dict:
+        try:
+            data = json.loads(_BRANDING_FILE.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _branding_allowed() -> bool:
+        info = get_license_info()
+        return bool(info) and (info.get("tier") or "single") == "msp"
+
+    @app.get("/api/report/branding")
+    def report_branding_get():
+        return jsonify({"allowed": _branding_allowed(),
+                        "branding": _load_branding() if _branding_allowed() else {}})
+
+    @app.post("/api/report/branding")
+    def report_branding_set():
+        if not _branding_allowed():
+            return jsonify({"error": "Report branding requires an MSP / Consultant "
+                            "license. Single-organization licenses export unbranded "
+                            "reports."}), 403
+        payload = request.get_json(silent=True) or {}
+        # C0 제어문자는 openpyxl이 거부해 export 전체가 400으로 죽고(재비판
+        # NEW-BUG), 개행·양방향 제어문자는 셀 표시를 왜곡한다. 전부 공백 치환.
+        import re as _re
+        _clean = lambda v: _re.sub(
+            "[\\x00-\\x1f\\x7f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]",
+            " ", str(v))[:80].strip()
+        branding = {
+            "company":      _clean(payload.get("company", "")),
+            "prepared_for": _clean(payload.get("prepared_for", "")),
+        }
+        _BRANDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _BRANDING_FILE.write_text(json.dumps(branding, ensure_ascii=False),
+                                  encoding="utf-8")
+        return jsonify({"ok": True, "branding": branding})
 
     @app.post("/api/license/activate")
     def license_activate():

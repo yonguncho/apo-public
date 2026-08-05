@@ -1112,6 +1112,31 @@ document.addEventListener('click', e => {
     content.innerHTML = html;
   }
 
+  // ── 화이트라벨 브랜딩 (MSP 티어에만 노출) ─────────────────────────
+  (async () => {
+    try {
+      const st = await (await fetch('/api/license/status')).json();
+      if (!st.licensed || st.tier !== 'msp') return;
+      const panel = document.getElementById('brandingPanel');
+      if (!panel) return;
+      panel.style.display = '';
+      const b = await (await fetch('/api/report/branding')).json();
+      const co = document.getElementById('brandCompany');
+      const pf = document.getElementById('brandFor');
+      if (co) co.value = (b.branding && b.branding.company) || '';
+      if (pf) pf.value = (b.branding && b.branding.prepared_for) || '';
+      const btn = document.getElementById('brandSaveBtn');
+      const stEl = document.getElementById('brandStatus');
+      if (btn) btn.addEventListener('click', async () => {
+        const res = await fetch('/api/report/branding', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({company: co?.value || '', prepared_for: pf?.value || ''}),
+        });
+        if (stEl) stEl.textContent = res.ok ? 'Saved — applies to the next export.' : 'Save failed.';
+      });
+    } catch (_) { /* 라이선스 미보유 등 — 패널 숨김 유지 */ }
+  })();
+
   // ── 정확도 검증 워크플로우 ─────────────────────────────────────────
   const vStatus = document.getElementById('verifyStatus');
   const vResult = document.getElementById('verifyResult');

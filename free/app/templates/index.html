@@ -284,6 +284,17 @@
               <span style="font-size:11px;color:var(--muted)">Low usage if hits fall below this value</span>
             </label>
           </div>
+          <div id="brandingPanel" style="display:none;margin-top:16px;padding-top:12px;border-top:1px solid #e2e8f0">
+            <p class="sev-guide-note" style="margin-top:0"><strong>Report branding</strong> (MSP / Consultant license) — exported reports carry your company name on the Summary page.</p>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+              <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Prepared by (your company)
+                <input type="text" id="brandCompany" class="sev-user-range-input" maxlength="80" placeholder="e.g. Acme Security Consulting" /></label>
+              <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Prepared for (client, optional)
+                <input type="text" id="brandFor" class="sev-user-range-input" maxlength="80" placeholder="e.g. Contoso Manufacturing" /></label>
+              <button type="button" id="brandSaveBtn" class="secondary-btn">Save branding</button>
+              <span id="brandStatus" class="inline-status"></span>
+            </div>
+          </div>
         </div>
       </article>
 
