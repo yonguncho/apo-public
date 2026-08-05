@@ -136,6 +136,27 @@ def _fqdn_map_from_monitor(payload) -> dict:
     return {k: sorted(v) for k, v in out.items() if v}
 
 
+def fetch_fqdn_map(device: dict) -> dict:
+    """FQDN 해석만 조회한다 — config는 이미 있고 FQDN만 필요할 때.
+
+    파일 업로드로 분석 중이어도 장비가 등록돼 있으면 덤프를 뜰 필요 없이
+    이 경로로 최신 해석을 가져온다.
+    """
+    ip, port, token, verify = _device_conn(device)
+    if not token:
+        raise ValueError("API token is required")
+    r = _get(ip, port, token, verify, "monitor/firewall/address-fqdns")
+    if r.status_code != 200:
+        raise ValueError(
+            f"FQDN resolutions unavailable (HTTP {r.status_code}). The token "
+            "needs read access to firewall monitor data.")
+    try:
+        return _fqdn_map_from_monitor(r.json())
+    except ValueError:
+        raise ValueError("The device returned an unexpected response for "
+                         "FQDN resolutions.")
+
+
 def collect_from_device(device: dict) -> dict:
     """장비에서 config·통계·FQDN을 수집한다.
 

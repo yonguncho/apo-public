@@ -1133,20 +1133,46 @@ document.addEventListener('click', e => {
   const fqdnBtn = document.getElementById('fqdnDumpBtn');
   const fqdnFile = document.getElementById('fqdnDumpFile');
   const fqdnSt = document.getElementById('fqdnDumpStatus');
+  // 캐시가 갱신되면 곧바로 재분류한다 — 위로 스크롤해 Classify를 다시
+  // 누르게 하면 사용자가 반영 여부를 헷갈린다.
+  async function applyFqdnCache(d, how) {
+    if (fqdnSt) fqdnSt.textContent =
+      `DNS resolutions ${how}: ${d.names} FQDNs / ${d.ips} IPs (captured ${d.captured_at}). Re-classifying...`;
+    await runClassify();
+    if (fqdnSt) fqdnSt.textContent =
+      `DNS resolutions ${how}: ${d.names} FQDNs / ${d.ips} IPs (captured ${d.captured_at}). Applied — FQDN policies are now assessed.`;
+  }
+
   if (fqdnBtn) fqdnBtn.addEventListener('click', () => fqdnFile?.click());
   if (fqdnFile) fqdnFile.addEventListener('change', async () => {
     const f = fqdnFile.files?.[0];
     if (!f) return;
     const fd = new FormData();
     fd.append('dump', f);
+    if (fqdnSt) fqdnSt.textContent = 'Reading dump...';
     try {
       const res = await fetch('/api/fqdn-cache/import', {method: 'POST', body: fd});
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Import failed');
-      if (fqdnSt) fqdnSt.textContent =
-        `DNS cache loaded: ${d.names} FQDNs / ${d.ips} IPs (captured ${d.captured_at}). Click Classify to re-run with FQDN policies included.`;
+      await applyFqdnCache(d, 'loaded from file');
     } catch (err) { if (fqdnSt) fqdnSt.textContent = err.message || 'Import failed'; }
     fqdnFile.value = '';
+  });
+
+  const fqdnFetch = document.getElementById('fqdnFetchBtn');
+  if (fqdnFetch) fqdnFetch.addEventListener('click', async () => {
+    if (fqdnSt) fqdnSt.textContent = 'Fetching FQDN resolutions from the device...';
+    fqdnFetch.disabled = true;
+    try {
+      const res = await fetch('/api/fqdn-cache/fetch-device', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({}),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Fetch failed');
+      await applyFqdnCache(d, 'fetched from device');
+    } catch (err) { if (fqdnSt) fqdnSt.textContent = err.message || 'Fetch failed'; }
+    finally { fqdnFetch.disabled = false; }
   });
 
   function collectThresholds() {

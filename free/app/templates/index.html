@@ -377,9 +377,10 @@
         </div>
         <p class="sev-guide-note" style="margin-top:0">A policy is listed here only when a single always-on policy above it <strong>provably matches every packet</strong> it could match (source, destination, service, and interfaces all contained) — so it never takes effect. Conservative static analysis: policies using geography / ISDB / user objects or negation are skipped, not guessed. Routing and NAT are not considered.</p>
         <div class="sev-user-range-row" style="flex-wrap:wrap;align-items:center">
-          <button type="button" id="fqdnDumpBtn" class="secondary-btn">Include FQDN policies — upload DNS cache dump</button>
+          <button type="button" id="fqdnFetchBtn" class="primary-btn">Include FQDN policies — fetch from connected device</button>
+          <button type="button" id="fqdnDumpBtn" class="secondary-btn">or upload DNS cache dump</button>
           <input type="file" id="fqdnDumpFile" accept=".txt,.log" hidden />
-          <span id="fqdnDumpStatus" class="inline-status">Optional: run <code>diagnose test application dnsproxy 6</code> on the firewall, save the output to a text file, and upload it. Exact-FQDN policies are then assessed too, marked "DNS capture" (provable as of capture time).</span>
+          <span id="fqdnDumpStatus" class="inline-status">If you collected from the device, FQDN resolutions are already included. Otherwise fetch them from a connected device, or upload the output of <code>diagnose test application dnsproxy 6</code>. Either way the results are re-classified automatically and marked "DNS capture" (provable as of capture time).</span>
         </div>
         <div id="sevReachContent" class="sev-table-wrap"></div>
       </article>

@@ -183,7 +183,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v85-2026-08-05"
+APO_VERSION = "v86-2026-08-05"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -720,17 +720,19 @@ def create_app() -> Flask:
     # ── 원클릭 장비 수집 (v83) — REST API로 config·통계·FQDN 일괄 ─────────
     # 파일 업로드의 대안(선택). 등록된 장비(remediation과 같은 연결 정보)에서
     # 읽기 전용으로 수집해 기존 분석 파이프라인에 그대로 주입한다.
-    @app.post("/api/collect/device")
-    def collect_device():
-        payload = request.get_json(silent=True) or {}
-        # 등록된 장비를 쓰거나, 이 요청에 담긴 연결 정보를 쓴다(저장 안 함).
+    def _resolve_device(payload: dict):
+        """요청의 연결 정보 또는 등록된 장비를 반환. (device, error_response)
+
+        두 라우트가 같은 규칙을 쓰도록 한 곳에 둔다 — 같은 로직을 복사하면
+        한쪽만 고쳐지는 사고가 난다(오늘 캐시 무효화에서 겪은 유형).
+        """
         device = app.config.get('remediation_device')
         if payload.get("ip"):
             from app.services.remediation_service import validate_device_address
             try:
                 port = int(payload.get("port", 443) or 443)
                 if not (1 <= port <= 65535):
-                    raise ValueError
+                    raise ValueError("port out of range")
                 device = {
                     "ip": validate_device_address(payload.get("ip", "")),
                     "port": port,
@@ -738,11 +740,22 @@ def create_app() -> Flask:
                     "vdom": str(payload.get("vdom", "root")).strip() or "root",
                     "verify_ssl": bool(payload.get("verify_ssl", True)),
                 }
-            except ValueError:
-                return jsonify({"error": "Invalid device address or port"}), 400
+            except ValueError as exc:
+                return None, (jsonify({"error": str(exc) or
+                                       "Invalid device address or port"}), 400)
         if not device or not device.get("token"):
-            return jsonify({"error": "Register a device (IP + API token) first, "
-                            "or include it in this request."}), 400
+            return None, (jsonify({
+                "error": "No device is connected. Register one in the "
+                         "Remediation tab, or use 'Collect from device' with "
+                         "an IP and API token."}), 400)
+        return device, None
+
+    @app.post("/api/collect/device")
+    def collect_device():
+        payload = request.get_json(silent=True) or {}
+        device, err = _resolve_device(payload)
+        if err:
+            return err
 
         from app.services.device_collector import collect_from_device
         import requests as _req
@@ -824,6 +837,35 @@ def create_app() -> Flask:
                                 "domains_seen": has_dom,
                                 "ipv4_seen": has_ip},
             }), 400
+        app.config['fqdn_cache'] = {
+            "map": mapping,
+            "captured_at": _dt.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        return jsonify({"ok": True, "names": len(mapping),
+                        "ips": sum(len(v) for v in mapping.values()),
+                        "captured_at": app.config['fqdn_cache']["captured_at"]})
+
+    @app.post("/api/fqdn-cache/fetch-device")
+    def fqdn_cache_fetch_device():
+        """연결된 장비에서 FQDN 해석만 가져온다 — 덤프 파일 없이."""
+        payload = request.get_json(silent=True) or {}
+        device, err = _resolve_device(payload)
+        if err:
+            return err
+        from app.services.device_collector import fetch_fqdn_map
+        import requests as _req
+        try:
+            mapping = fetch_fqdn_map(device)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except _req.exceptions.SSLError:
+            return jsonify({"error": "TLS verification failed."}), 502
+        except _req.exceptions.RequestException:
+            return jsonify({"error": "Could not reach the device."}), 502
+        if not mapping:
+            return jsonify({"error": "The device reported no resolved FQDN "
+                            "addresses. FQDN objects resolve only after they "
+                            "have been used."}), 400
         app.config['fqdn_cache'] = {
             "map": mapping,
             "captured_at": _dt.now().strftime("%Y-%m-%d %H:%M"),
