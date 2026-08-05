@@ -320,6 +320,22 @@
         <div id="sevReachContent" class="sev-table-wrap"></div>
       </article>
 
+      <article class="glass-card" id="sevVerifyCard" style="margin-bottom:20px;padding:20px;display:none">
+        <div class="section-heading">
+          <div><span class="section-index">Verify</span><h2>Accuracy Verification</h2></div>
+          <span class="inline-status">Free — verify APO's calls against your firewall before you trust them</span>
+        </div>
+        <p class="sev-guide-note" style="margin-top:0">Don't take this report on faith. APO draws a stratified sample across severity levels (up to ~31 policies), each with <strong>what to check</strong> and the <strong>exact CLI commands</strong> to run on your FortiGate. Fill in what you actually found and whether the call matched, then upload the sheet back — APO computes per-level precision. Held or unfilled rows are excluded from the denominator, never counted as right or wrong.</p>
+        <div class="sev-user-range-row" style="flex-wrap:wrap">
+          <button type="button" id="verifySampleXlsxBtn" class="secondary-btn">Download sample worksheet (.xlsx)</button>
+          <button type="button" id="verifySampleCsvBtn" class="secondary-btn">.csv</button>
+          <button type="button" id="verifyUploadBtn" class="primary-btn">Upload completed worksheet</button>
+          <input type="file" id="verifyUploadFile" accept=".csv,.xlsx" hidden />
+        </div>
+        <div class="inline-status" id="verifyStatus"></div>
+        <div id="verifyResult" class="sev-table-wrap" style="margin-top:12px"></div>
+      </article>
+
       <article class="glass-card" id="sevTableCard" style="padding:20px;display:none">
         <div class="sev-subtabs">
           <button class="sev-subtab-btn active" data-sev-tab="firewall">Firewall Policy</button>

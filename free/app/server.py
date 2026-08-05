@@ -180,7 +180,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v75-2026-08-05"
+APO_VERSION = "v76-2026-08-05"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -604,6 +604,102 @@ def create_app() -> Flask:
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={"Content-Disposition": "attachment; filename=severity_export.xlsx"}
         )
+
+    # ── 정확도 검증 워크플로우 ─────────────────────────────────────────────
+    # 의도적으로 무료다: 이 기능의 목적은 "APO 판정을 그대로 믿지 말고
+    # 표본으로 직접 검증하라"는 신뢰 구축이고, 구매 전 사용자가 해볼 수
+    # 있어야 의미가 있다. 감사 산출물(유료 export)과는 성격이 다르다.
+    @app.post("/api/verification/sample")
+    def verification_sample():
+        parsed = app.config.get('last_parsed')
+        if not parsed:
+            return jsonify({"error": "No config loaded. Upload a config file first."}), 400
+        from app.services import verification as vf
+        from app.services.policy_renderer import build_view_model as _bvm
+        fmt = str(request.args.get("format", "xlsx")).lower()
+        context = {
+            "service_groups": parsed.get("service_groups", {}),
+            "user_ranges": app.config.get('user_ranges', []),
+            "today": _date.today(),
+            **_engine_ctx(),
+        }
+        view = _bvm(parsed, app.config.get('last_runtime_stats', {}))
+        results = []
+        for key, ptype in (("firewall_policy", "firewall"),
+                           ("firewall_proxy_policy", "proxy")):
+            for pol in view.get(key, []):
+                results.append({**pol, "policy_type": ptype,
+                                **evaluate_severity(pol, context)})
+        samples = vf.stratified_sample(results)
+        rows = vf.build_rows(samples)
+        if fmt == "csv":
+            return app.response_class(
+                response=vf.to_csv(rows), status=200, mimetype="text/csv",
+                headers={"Content-Disposition":
+                         "attachment; filename=apo_verification_sample.csv"})
+        return app.response_class(
+            response=vf.to_xlsx(rows), status=200,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition":
+                     "attachment; filename=apo_verification_sample.xlsx"})
+
+    @app.post("/api/verification/score")
+    def verification_score():
+        from app.services import verification as vf
+        uploaded = request.files.get("worksheet")
+        if not uploaded:
+            return jsonify({"error": "worksheet file is required (.csv or .xlsx)"}), 400
+        labels = {label: key for key, label in vf.WORKSHEET_COLUMNS}
+        rows = []
+        name = (uploaded.filename or "").lower()
+        try:
+            if name.endswith(".xlsx"):
+                import io as _io
+                from openpyxl import load_workbook
+                wb = load_workbook(_io.BytesIO(uploaded.read()), read_only=True)
+                ws = wb.active
+                header = None
+                for raw in ws.iter_rows(values_only=True):
+                    if header is None:
+                        header = [labels.get(str(h or "").strip(), str(h or "").strip())
+                                  for h in raw]
+                        continue
+                    rows.append({header[i]: ("" if v is None else str(v))
+                                 for i, v in enumerate(raw) if i < len(header)})
+            else:
+                import csv as _csv, io as _io
+                raw_bytes = uploaded.read()
+                # 한국 Excel의 "CSV(쉼표로 분리)" 기본 저장은 cp949다. 강제
+                # utf-8(errors=replace)로 읽으면 한글 판정값("일치")이 U+FFFD로
+                # 깨져 전량 '미기입'이 되는데, 오류 없이 0건 채점으로 위장된다
+                # (재비판 NEW-BUG). 엄격 디코딩 + cp949 폴백으로 바꾼다.
+                text = None
+                for enc in ("utf-8-sig", "cp949"):
+                    try:
+                        text = raw_bytes.decode(enc)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                if text is None:
+                    return jsonify({"error": "Could not decode the CSV. "
+                                    "Save it as UTF-8 or the Korean Excel default (CP949)."}), 400
+                first = text.splitlines()[0] if text.splitlines() else ""
+                delim = ";" if first.count(";") > first.count(",") else ","
+                for raw in _csv.DictReader(_io.StringIO(text), delimiter=delim):
+                    rows.append({labels.get((k or "").strip(), (k or "").strip()): v
+                                 for k, v in raw.items()})
+        except Exception:
+            return jsonify({"error": "Could not read the worksheet. "
+                            "Upload the file generated by APO (.csv or .xlsx)."}), 400
+        if not rows:
+            return jsonify({"error": "The worksheet has no data rows."}), 400
+        # 헤더가 판정 컬럼으로 매핑되지 않았으면(인코딩·구분자·양식 문제) 빈
+        # 정확도 리포트로 위장하지 말고 원인을 말한다 (재비판 SUSPECT 2건).
+        if not any("verdict" in r for r in rows):
+            return jsonify({"error": "Worksheet columns were not recognized — "
+                            "upload the sheet generated by APO, keeping its header row."}), 400
+        stats = vf.compute_precision(rows)
+        return jsonify(stats)
 
     # ── Version Advisor ────────────────────────────────────────────────────
     @app.get("/api/version-advisor")

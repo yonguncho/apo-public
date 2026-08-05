@@ -1112,6 +1112,65 @@ document.addEventListener('click', e => {
     content.innerHTML = html;
   }
 
+  // ── 정확도 검증 워크플로우 ─────────────────────────────────────────
+  const vStatus = document.getElementById('verifyStatus');
+  const vResult = document.getElementById('verifyResult');
+
+  async function downloadSample(fmt) {
+    if (vStatus) vStatus.textContent = 'Generating sample...';
+    try {
+      const res = await fetch('/api/verification/sample?format=' + fmt, {method:'POST'});
+      if (!res.ok) { await alertApiError(res, 'Failed to generate sample.'); if (vStatus) vStatus.textContent=''; return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'apo_verification_sample.' + fmt; a.click();
+      URL.revokeObjectURL(url);
+      if (vStatus) vStatus.textContent = 'Sample downloaded. Run the listed commands on your firewall, fill in the last three columns, then upload the sheet back here.';
+    } catch (err) { if (vStatus) vStatus.textContent = err.message || 'Failed'; }
+  }
+
+  function renderPrecision(stats) {
+    if (!vResult) return;
+    const lv = stats.levels || {};
+    const pct = v => v == null ? '-' : (v * 100).toFixed(1) + '%';
+    let html = `<table class="result-table"><thead><tr>
+      <th>Severity</th><th>Match</th><th>Mismatch</th><th>Hold</th><th>Unfilled</th><th>Precision</th>
+    </tr></thead><tbody>` + Object.entries(lv).map(([k, d]) => `<tr>
+      <td>${escapeHtml(String(k))}</td><td>${d.match}</td><td>${d.mismatch}</td>
+      <td>${d.hold}</td><td>${d.unfilled}</td><td><strong>${pct(d.precision)}</strong></td>
+    </tr>`).join('') + '</tbody></table>';
+    const o = stats.overall || {};
+    html += `<p class="sev-guide-note"><strong>Overall precision: ${pct(o.precision)}</strong> (${o.match} match / ${o.mismatch} mismatch across ${o.judged} judged samples). Held and unfilled rows are excluded from the denominator.</p>`;
+    if ((stats.weak_levels || []).length) {
+      html += `<p class="sev-guide-note">⚠ Levels ${stats.weak_levels.map(escapeHtml).join(', ')} have fewer than 5 judged samples — treat those numbers as indicative, not conclusive.</p>`;
+    }
+    vResult.innerHTML = html;
+  }
+
+  const vXlsx = document.getElementById('verifySampleXlsxBtn');
+  const vCsv = document.getElementById('verifySampleCsvBtn');
+  const vUpBtn = document.getElementById('verifyUploadBtn');
+  const vUpFile = document.getElementById('verifyUploadFile');
+  if (vXlsx) vXlsx.addEventListener('click', () => downloadSample('xlsx'));
+  if (vCsv) vCsv.addEventListener('click', () => downloadSample('csv'));
+  if (vUpBtn) vUpBtn.addEventListener('click', () => vUpFile?.click());
+  if (vUpFile) vUpFile.addEventListener('change', async () => {
+    const file = vUpFile.files?.[0];
+    if (!file) return;
+    if (vStatus) vStatus.textContent = 'Scoring...';
+    const fd = new FormData();
+    fd.append('worksheet', file);
+    try {
+      const res = await fetch('/api/verification/score', {method:'POST', body: fd});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Scoring failed');
+      renderPrecision(data);
+      if (vStatus) vStatus.textContent = 'Scored.';
+    } catch (err) { if (vStatus) vStatus.textContent = err.message || 'Failed'; }
+    vUpFile.value = '';
+  });
+
   async function runClassify() {
     if (statusEl) statusEl.textContent='Classifying...';
     try {
@@ -1133,6 +1192,8 @@ document.addEventListener('click', e => {
       sevData=data;
       window.__sevHasData = true;   // CSV 임포트 후 자동 재분류 트리거용(스코프 밖 접근)
       renderSummaryBar(data); renderTable(); renderReachability(data.reachability);
+      const vc = document.getElementById('sevVerifyCard');
+      if (vc) vc.style.display='';   // 분류가 있어야 표본 추출이 의미 있다
       const total=(data.firewall||[]).length+(data.proxy||[]).length;
       if (statusEl) statusEl.textContent=`Classification complete — ${total} policies processed.`;
     } catch(err) {
