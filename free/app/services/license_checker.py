@@ -57,6 +57,39 @@ def _machine_id() -> str:
 # 만료 우회에 의미 있는 폭은 아니므로 며칠은 허용한다.
 _CLOCK_GRACE = timedelta(days=2)
 
+# ── 업데이트 자격 (B-09) ────────────────────────────────────────────────
+# 일회성 구매 + "구매 후 1년 업데이트 포함". 구매한 시점까지의 버전은 영구
+# 사용이고, 발급일+365일 이후에 나온 릴리스에서만 잠긴다.
+#
+# RELEASE_DATE는 이 빌드의 릴리스일이다. server.APO_VERSION의 날짜와 반드시
+# 일치해야 하며, 테스트(test_release_date_matches_version)가 이를 강제한다 —
+# 버전 올릴 때 이 상수를 잊으면 스위트가 깨진다.
+#
+# UPDATE_POLICY_START 이전에 발급된 키(기존 구매자 전원)는 영구 업데이트로
+# 조부 조항 처리한다. 판매 후 약관을 소급 변경하지 않기 위해서다.
+RELEASE_DATE = date(2026, 8, 5)
+UPDATE_POLICY_START = date(2026, 8, 6)
+UPDATE_WINDOW = timedelta(days=365)
+
+
+def _check_update_entitlement(payload: dict) -> None:
+    issued_raw = payload.get('issued')
+    if not issued_raw:
+        return                       # 발급일 없는 키(비정상)는 여기서 막지 않는다
+    try:
+        issued = datetime.strptime(str(issued_raw), '%Y-%m-%d').date()
+    except ValueError:
+        return
+    if issued < UPDATE_POLICY_START:
+        return                       # 조부 조항 — 기존 구매자
+    if RELEASE_DATE > issued + UPDATE_WINDOW:
+        window_end = issued + UPDATE_WINDOW
+        raise ValueError(
+            f'Your one year of included updates ended on {window_end}. '
+            f'This version was released after that date. Your key keeps '
+            f'working forever on releases from before {window_end} — '
+            f'or renew your license to use the latest version.')
+
 
 def _high_water_path() -> Path:
     return _license_path().with_suffix('.state')
@@ -142,6 +175,7 @@ def verify_key(key: str) -> dict:
         if machine and str(machine) != _machine_id():
             raise ValueError('License is bound to a different machine')
 
+        _check_update_entitlement(payload)
         return payload
     except (ValueError, KeyError):
         raise
