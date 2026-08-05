@@ -25,6 +25,15 @@ bound to the machine it was first activated on.
 Keys purchased before license tiers were introduced are treated as Single
 Organization licenses.
 
+### Updates
+
+Licenses purchased on or after 2026-08-06 include **one (1) year of
+updates** from the purchase date. Versions released within your update
+window keep working with your key **forever** — the window limits which
+new releases your key activates, never your right to use what you bought.
+Renewal for continued updates is optional. Keys purchased before
+2026-08-06 receive updates indefinitely.
+
 ## 2. Restrictions
 
 You may not: (a) resell, sublicense, or share your license key; (b) reverse
