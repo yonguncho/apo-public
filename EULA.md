@@ -12,6 +12,19 @@ perpetual license to activate and use the Excel workbook export feature of
 the Software on **one (1) machine** per license key purchased. The license is
 bound to the machine it was first activated on.
 
+### License tiers
+
+- **Single Organization** — for analyzing the firewall configurations of
+  **your own organization** only. Using a Single Organization license to
+  deliver paid analysis or audit services to third parties is not permitted.
+- **MSP / Consultant** — for managed service providers and consultants.
+  Permits analyzing configurations of **multiple client organizations** and
+  enables report branding ("Prepared by") in exported workbooks. Still bound
+  to one (1) machine per key.
+
+Keys purchased before license tiers were introduced are treated as Single
+Organization licenses.
+
 ## 2. Restrictions
 
 You may not: (a) resell, sublicense, or share your license key; (b) reverse
