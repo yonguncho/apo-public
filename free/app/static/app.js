@@ -350,12 +350,15 @@ function renderMeta(meta) {
     ['Service Group', meta.service_group_count ?? 0],
     ['Interface', meta.interface_count ?? 0],
   ];
-  metaBox.innerHTML = items.map(([label, value]) => `
+  metaBox.innerHTML = items.map(([label, value]) => {
+    const v = String(value);
+    const cls = v.length > 14 ? 'stat-value long' : 'stat-value';
+    return `
     <div class="stat-card">
       <span class="stat-label">${escapeHtml(label)}</span>
-      <strong class="stat-value">${escapeHtml(String(value))}</strong>
-    </div>
-  `).join('');
+      <strong class="${cls}" title="${escapeHtml(v)}">${escapeHtml(v)}</strong>
+    </div>`;
+  }).join('');
 }
 
 function renderPolicyCsvSummary() {
