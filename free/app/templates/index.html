@@ -38,6 +38,22 @@
         <p>Upload the current FortiGate configuration and GUI policy CSV to review policy status, usage data, objects, services, and optimization candidates.</p>
       </div>
 
+      <details class="glass-card" style="margin-bottom:16px;padding:16px 20px">
+        <summary style="cursor:pointer;font-weight:600">Collect from device instead of uploading files (optional)</summary>
+        <p class="sev-guide-note" style="margin-top:10px">Connect to a FortiGate over its REST API and pull the configuration, hit-count / last-used stats, and FQDN resolutions in one step — no file exports needed. <strong>A read-only API token is enough</strong> (this only reads; it never changes the device). Prefer the file-upload path on air-gapped networks. The token is kept in memory only, never written to disk.</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+          <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">FortiGate IP / host
+            <input type="text" id="collIp" class="sev-user-range-input" placeholder="10.0.0.1" /></label>
+          <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Port
+            <input type="number" id="collPort" class="sev-user-range-input" value="443" style="width:90px" /></label>
+          <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">API token (read-only)
+            <input type="password" id="collToken" class="sev-user-range-input" placeholder="REST API key" /></label>
+          <label class="inline-status" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="collSkipSsl" /> Skip TLS verification (trusted network only)</label>
+          <button type="button" id="collectBtn" class="primary-btn">Collect from device</button>
+        </div>
+        <div class="inline-status" id="collectStatus" style="margin-top:8px"></div>
+      </details>
+
       <div class="quick-upload analysis-upload upload-3col">
         <div class="quick-upload-card">
           <div>
@@ -270,7 +286,14 @@
           <button type="button" id="sevThresholdToggle" class="secondary-btn">Show</button>
         </div>
         <div id="sevThresholdPanel" style="display:none">
-          <p class="sev-guide-note" style="margin-top:0">No public standard prescribes these numbers — they are <strong>your organization's audit criteria</strong>. Defaults come from the active profile (<span id="sevProfileName">default</span>). Changes apply the next time you click Classify.</p>
+          <p class="sev-guide-note" style="margin-top:0"><strong>Not sure what to set? Leave the defaults.</strong> They are sensible for most environments (365 days keeps once-a-year jobs like year-end batches from being flagged). These numbers exist as settings because no public standard defines them — they are your organization's audit criteria, not the tool's. Pick a preset or adjust individual values; changes apply the next time you click Classify. Active profile: <span id="sevProfileName">default</span>.</p>
+          <div class="sev-user-range-row" style="flex-wrap:wrap;margin-bottom:10px">
+            <span class="inline-status">Presets:</span>
+            <button type="button" class="secondary-btn th-preset" data-dorm="365" data-long="730">Standard — flag after 1 year unused</button>
+            <button type="button" class="secondary-btn th-preset" data-dorm="180" data-long="365">Strict — flag after 6 months</button>
+            <button type="button" class="secondary-btn th-preset" data-dorm="730" data-long="1460">Relaxed — flag after 2 years</button>
+            <button type="button" id="thResetBtn" class="secondary-btn">Reset to profile defaults</button>
+          </div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 20px">
             <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Dormancy period (days)
               <input type="number" id="thDormancy" class="sev-user-range-input" min="1" max="3650" />
@@ -352,7 +375,12 @@
           <div><span class="section-index">Unreachable</span><h2>Unreachable Policy Detection</h2></div>
           <span class="inline-status" id="sevReachCoverage"></span>
         </div>
-        <p class="sev-guide-note" style="margin-top:0">A policy is listed here only when a single always-on policy above it <strong>provably matches every packet</strong> it could match (source, destination, service, and interfaces all contained) — so it never takes effect. Conservative static analysis: policies using FQDN / geography / ISDB / user objects or negation are skipped, not guessed. Routing and NAT are not considered.</p>
+        <p class="sev-guide-note" style="margin-top:0">A policy is listed here only when a single always-on policy above it <strong>provably matches every packet</strong> it could match (source, destination, service, and interfaces all contained) — so it never takes effect. Conservative static analysis: policies using geography / ISDB / user objects or negation are skipped, not guessed. Routing and NAT are not considered.</p>
+        <div class="sev-user-range-row" style="flex-wrap:wrap;align-items:center">
+          <button type="button" id="fqdnDumpBtn" class="secondary-btn">Include FQDN policies — upload DNS cache dump</button>
+          <input type="file" id="fqdnDumpFile" accept=".txt,.log" hidden />
+          <span id="fqdnDumpStatus" class="inline-status">Optional: run <code>diagnose test application dnsproxy 6</code> on the firewall, save the output to a text file, and upload it. Exact-FQDN policies are then assessed too, marked "DNS capture" (provable as of capture time).</span>
+        </div>
         <div id="sevReachContent" class="sev-table-wrap"></div>
       </article>
 

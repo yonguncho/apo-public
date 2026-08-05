@@ -486,7 +486,7 @@ def _add_unreachable_sheet(wb: Workbook, result: dict) -> None:
 
     ws = wb.create_sheet("Unreachable")
     headers = ["Policy ID", "Policy Name", "Shadowed By (ID)",
-               "Shadowed By Name", "Shadower Action", "Detail"]
+               "Shadowed By Name", "Shadower Action", "Proof", "Detail"]
     for col, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=h)
         cell.fill = HEADER_FILL
@@ -495,8 +495,10 @@ def _add_unreachable_sheet(wb: Workbook, result: dict) -> None:
     for u in unreachable:
         for col, key in enumerate(("policy_id", "name", "shadowed_by",
                                    "shadowed_by_name", "shadowed_by_action",
-                                   "detail"), 1):
-            write_text_cell(ws, r, col, str(u.get(key, "")))
+                                   "proof", "detail"), 1):
+            # proof: config = 설정만으로 증명 / capture = DNS 캐시 수집 시점 기준
+            write_text_cell(ws, r, col, str(u.get(key, "") or
+                                            ("config" if key == "proof" else "")))
         r += 1
 
     r += 1
@@ -522,7 +524,8 @@ def _add_unreachable_sheet(wb: Workbook, result: dict) -> None:
             write_text_cell(ws, r, 3, str(s.get("reason", "")))
             r += 1
 
-    for col, width in (("A", 12), ("B", 34), ("C", 16), ("D", 34), ("E", 14), ("F", 70)):
+    for col, width in (("A", 12), ("B", 34), ("C", 16), ("D", 34), ("E", 14),
+                       ("F", 10), ("G", 70)):
         ws.column_dimensions[col].width = width
 
 

@@ -210,6 +210,56 @@ configPickerBtn.addEventListener('click', () => configFileInput.click());
 fwCsvPickerBtn.addEventListener('click', () => fwPolicyCsvFile.click());
 proxyCsvPickerBtn.addEventListener('click', () => proxyPolicyCsvFile.click());
 
+function applyLoadedConfig(data, sourceLabel) {
+  currentParsed = data.parsed;
+  currentView = data.view;
+  currentRuntimeStats = data.runtime_stats || {};
+  fwCsvSummary = null;
+  proxyCsvSummary = null;
+  if (selectedFwCsvName) selectedFwCsvName.textContent = 'No file selected';
+  if (selectedProxyCsvName) selectedProxyCsvName.textContent = 'No file selected';
+  resetPolicyFilters();
+  configStatus.textContent = sourceLabel;
+  policyStatsStatus.textContent = data.stats_count
+    ? `${data.stats_count} policies have usage stats from the device.`
+    : 'Upload Firewall Policy CSV or Proxy Policy CSV.';
+  renderPolicyCsvSummary();
+  renderMeta(data.view?.meta || {});
+  updatePolicyFilterVisibility();
+  renderActiveTab();
+}
+
+(() => {
+  const btn = document.getElementById('collectBtn');
+  const st = document.getElementById('collectStatus');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const ip = document.getElementById('collIp')?.value.trim();
+    const token = document.getElementById('collToken')?.value.trim();
+    if (!ip || !token) { if (st) st.textContent = 'Enter the device IP and API token.'; return; }
+    if (st) st.textContent = 'Connecting and collecting (config, stats, FQDNs)...';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/collect/device', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          ip, token,
+          port: Number(document.getElementById('collPort')?.value || 443),
+          verify_ssl: !(document.getElementById('collSkipSsl')?.checked),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Collection failed');
+      applyLoadedConfig(data, `Collected from ${data.hostname || ip}`);
+      let msg = `Collected: ${data.policies} policies, ${data.stats_count} usage stats, ${data.fqdn_count} FQDN resolutions.`;
+      if ((data.warnings || []).length) msg += ' Note: ' + data.warnings.join('; ');
+      if (st) st.textContent = msg;
+    } catch (err) {
+      if (st) st.textContent = err.message || 'Collection failed';
+    } finally { btn.disabled = false; }
+  });
+})();
+
 configFileInput.addEventListener('change', async () => {
   const file = configFileInput.files?.[0];
   selectedConfigName.textContent = file ? file.name : 'No file selected';
@@ -1070,6 +1120,35 @@ document.addEventListener('click', e => {
   }
   loadThresholdDefaults();
 
+  document.querySelectorAll('.th-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (thEls.dormancy_days) thEls.dormancy_days.value = btn.dataset.dorm;
+      if (thEls.long_dormancy_days) thEls.long_dormancy_days.value = btn.dataset.long;
+    });
+  });
+  const thReset = document.getElementById('thResetBtn');
+  if (thReset) thReset.addEventListener('click', () => loadThresholdDefaults());
+
+  // FQDN 캐시 덤프 업로드 — 업로드 후 재분류해야 반영된다
+  const fqdnBtn = document.getElementById('fqdnDumpBtn');
+  const fqdnFile = document.getElementById('fqdnDumpFile');
+  const fqdnSt = document.getElementById('fqdnDumpStatus');
+  if (fqdnBtn) fqdnBtn.addEventListener('click', () => fqdnFile?.click());
+  if (fqdnFile) fqdnFile.addEventListener('change', async () => {
+    const f = fqdnFile.files?.[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append('dump', f);
+    try {
+      const res = await fetch('/api/fqdn-cache/import', {method: 'POST', body: fd});
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Import failed');
+      if (fqdnSt) fqdnSt.textContent =
+        `DNS cache loaded: ${d.names} FQDNs / ${d.ips} IPs (captured ${d.captured_at}). Click Classify to re-run with FQDN policies included.`;
+    } catch (err) { if (fqdnSt) fqdnSt.textContent = err.message || 'Import failed'; }
+    fqdnFile.value = '';
+  });
+
   function collectThresholds() {
     const out = {};
     for (const [key, el] of Object.entries(thEls)) {
@@ -1094,14 +1173,18 @@ document.addEventListener('click', e => {
       `${unreachable.length} unreachable · assessed ${reach.checked}/${reach.total_enabled} enabled policies · ${skipped.length} skipped`;
     let html = '';
     if (unreachable.length) {
+      const cap = reach.fqdn_captured_at;
       html += `<table class="result-table"><thead><tr>
-        <th>Policy ID</th><th>Name</th><th>Shadowed By</th><th>Shadower Name</th><th>Shadower Action</th>
+        <th>Policy ID</th><th>Name</th><th>Shadowed By</th><th>Shadower Name</th><th>Shadower Action</th><th>Proof</th>
       </tr></thead><tbody>` + unreachable.map(u => `<tr>
         <td>${escapeHtml(String(u.policy_id??''))}</td>
         <td>${escapeHtml(u.name||'')}</td>
         <td>${escapeHtml(String(u.shadowed_by??''))}</td>
         <td>${escapeHtml(u.shadowed_by_name||'')}</td>
         <td>${escapeHtml(u.shadowed_by_action||'')}</td>
+        <td>${u.proof === 'capture'
+              ? `<span title="Provable as of the DNS cache capture${cap ? ' (' + escapeHtml(cap) + ')' : ''} — FQDN resolutions can change over time">DNS capture</span>`
+              : '<span title="Provable from the configuration alone">config</span>'}</td>
       </tr>`).join('') + '</tbody></table>';
     } else {
       html += '<div class="empty-state"><strong>No unreachable policies found</strong><span>Among the policies that could be assessed, none is fully shadowed by a single policy above it.</span></div>';
@@ -1146,13 +1229,13 @@ document.addEventListener('click', e => {
         if (exp) exp.style.display = '';
         if (st) st.textContent = `${data.snapshots.length} snapshots, ${data.intervals.length} interval(s).`;
         if (out) out.innerHTML = `<table class="result-table"><thead><tr>
-          <th>#</th><th>From → To</th><th>+Pol</th><th>-Pol</th><th>Δ Pol</th><th>Objects</th><th>Changed IDs</th>
+          <th>#</th><th>From → To</th><th>Policies added</th><th>Policies removed</th><th>Policies modified</th><th>Objects added / removed</th><th>Modified policy IDs</th>
         </tr></thead><tbody>` + data.intervals.map((iv, i) => {
           const s2 = iv.summary || {};
           return `<tr><td>${i + 1}</td>
             <td>${escapeHtml(iv.from)} → ${escapeHtml(iv.to)}</td>
             <td>${s2.added_policies}</td><td>${s2.removed_policies}</td><td>${s2.changed_policies}</td>
-            <td>+${s2.added_objects}/-${s2.removed_objects}</td>
+            <td>${s2.added_objects} added / ${s2.removed_objects} removed</td>
             <td style="font-size:11px;max-width:220px">${escapeHtml((s2.changed_ids || []).join(', '))}</td></tr>`;
         }).join('') + '</tbody></table>';
       } catch (err) { if (st) st.textContent = err.message || 'Failed'; }

@@ -114,13 +114,42 @@ def _addr_object_intervals(item: dict) -> list[tuple[int, int]] | None:
     return None
 
 
-def build_address_map(parsed: dict) -> dict[str, list[tuple[int, int]] | None]:
-    """주소·주소그룹 이름 -> IP 구간 목록(환원 불가 시 None)."""
+def build_address_map(parsed: dict, fqdn_map: dict | None = None,
+                      capture_names: set | None = None
+                      ) -> dict[str, list[tuple[int, int]] | None]:
+    """주소·주소그룹 이름 -> IP 구간 목록(환원 불가 시 None).
+
+    fqdn_map(dnsproxy 캐시)이 있으면 type=fqdn 객체를 그 스냅샷 IP로
+    환원한다. 이렇게 환원된 이름(과 이를 포함한 그룹)은 capture_names에
+    기록된다 — 이 이름이 판정에 쓰이면 증명 등급이 'config'가 아니라
+    'capture'(수집 시점 기준)로 떨어져야 하기 때문이다.
+    """
     out: dict[str, Any] = {}
+    fqdn_map = fqdn_map or {}
     for item in parsed.get("firewall_address", []) or []:
         name = item.get("name") or item.get("_edit") or ""
-        if name:
-            out[name] = _addr_object_intervals(item)
+        if not name:
+            continue
+        iv = _addr_object_intervals(item)
+        used_capture = False
+        if iv is None and fqdn_map and item.get("type") == "fqdn":
+            dom = str(item.get("fqdn", "")).lower().strip().strip(".")
+            ips = fqdn_map.get(dom)
+            if ips:
+                try:
+                    iv = _merge_intervals(
+                        [(int(ipaddress.IPv4Address(x)),) * 2 for x in ips])
+                    used_capture = True
+                except ipaddress.AddressValueError:
+                    iv = None
+        out[name] = iv
+        # 같은 이름이 config로 재정의되면(다중 VDOM 평탄화 등) capture 표식을
+        # 거둔다 — 실제 판정에 쓰이는 값이 config이면 등급도 config다(재비판).
+        if capture_names is not None:
+            if used_capture:
+                capture_names.add(name)
+            else:
+                capture_names.discard(name)
 
     groups = {
         (g.get("name") or g.get("_edit") or ""): (g.get("member") or [])
@@ -139,6 +168,8 @@ def build_address_map(parsed: dict) -> dict[str, list[tuple[int, int]] | None]:
             if r is None:
                 out[name] = None  # 멤버 하나라도 환원 불가 → 그룹 전체 불가
                 return None
+            if capture_names is not None and m in capture_names:
+                capture_names.add(name)   # capture 멤버 포함 → 그룹도 capture
             acc.extend(r)
         out[name] = _merge_intervals(acc)
         return out[name]
@@ -461,7 +492,9 @@ def _addr_fail_reason(names, addr_map: dict, vip_map: dict, dns_names: set,
             continue
         if n in dns_names:
             return (f"{side} address resolves via DNS at runtime "
-                    "(FQDN / wildcard-FQDN / geography) — cannot be reduced offline")
+                    "(FQDN / wildcard-FQDN / geography) — upload a "
+                    "'diagnose test application dnsproxy 6' dump to include "
+                    "exact-FQDN objects")
         if n in vip_map and vip_map.get(n) is None:
             return (f"{side} address uses a VIP this analysis cannot reduce "
                     "(port-forward, load-balance, or unparsable mappedip)")
@@ -476,7 +509,8 @@ def _addr_fail_reason(names, addr_map: dict, vip_map: dict, dns_names: set,
 
 
 def _policy_space(p: dict, addr_map: dict, svc_map: dict,
-                  vip_map: dict | None = None, dns_names: set | None = None):
+                  vip_map: dict | None = None, dns_names: set | None = None,
+                  capture_names: set | None = None):
     """정책 -> 매칭 공간 dict. 환원 불가면 (None, 사유)."""
     vip_map = vip_map or {}
     dns_names = dns_names or set()
@@ -506,6 +540,9 @@ def _policy_space(p: dict, addr_map: dict, svc_map: dict,
         #  - 이 정책을 가리는 shadower는 accept여야 한다 (deny는 match-vip
         #    없이 VIP 트래픽을 매칭하지 않는다)
         "vip_dst": uses_vip,
+        # FQDN 캐시로 환원된 이름이 섞이면 이 정책의 판정은 '수집 시점 기준'
+        "capture": any(n in (capture_names or set())
+                       for n in (p.get("srcaddr") or []) + (p.get("dstaddr") or [])),
     }, None
 
 
@@ -517,10 +554,16 @@ def _space_covers(a: dict, b: dict) -> bool:
             and _service_covers(a["svc"], b["svc"]))
 
 
-def detect_unreachable(parsed: dict) -> dict:
-    """도달 불가 정책 목록과 판정 커버리지를 반환한다."""
+def detect_unreachable(parsed: dict, fqdn_map: dict | None = None) -> dict:
+    """도달 불가 정책 목록과 판정 커버리지를 반환한다.
+
+    fqdn_map: dnsproxy 캐시(선택). 주면 FQDN 정책도 판정하되, 그 결과의
+    proof는 'capture'(수집 시점 기준)로 구분된다 — config만으로 증명된
+    'config' 등급과 섞지 않는다.
+    """
     policies = parsed.get("firewall_policy", []) or []
-    addr_map = build_address_map(parsed)
+    capture_names: set = set()
+    addr_map = build_address_map(parsed, fqdn_map, capture_names)
     svc_map = build_service_map(parsed)
     vip_map = build_vip_map(parsed)
     dns_names = collect_dns_object_names(parsed)
@@ -534,7 +577,8 @@ def detect_unreachable(parsed: dict) -> dict:
     for p in policies:
         status = str(p.get("status", "enable")).lower()
         schedule = p.get("schedule") or "always"
-        space, why = _policy_space(p, addr_map, svc_map, vip_map, dns_names)
+        space, why = _policy_space(p, addr_map, svc_map, vip_map, dns_names,
+                                   capture_names)
 
         if space is not None and status in ("enable", "enabled", ""):
             checked += 1
@@ -545,7 +589,10 @@ def detect_unreachable(parsed: dict) -> dict:
                         str(sp_pol.get("action", "")).lower() != "accept":
                     continue
                 if _space_covers(sp, space):
+                    proof = "capture" if (space.get("capture")
+                                          or sp.get("capture")) else "config"
                     unreachable.append({
+                        "proof": proof,
                         "policy_id": p.get("policy_id"),
                         "name": p.get("name", ""),
                         "shadowed_by": sp_pol.get("policy_id"),
@@ -578,12 +625,16 @@ def detect_unreachable(parsed: dict) -> dict:
         "total_enabled": sum(
             1 for p in policies
             if str(p.get("status", "enable")).lower() in ("enable", "enabled", "")),
+        "capture_used": bool(fqdn_map),
         "note": (
             "Conservative static analysis: a policy is reported only when a single "
             "always-on policy above it provably matches every packet it could match. "
             "Policies using FQDN/geography/ISDB/user objects or negation are skipped "
             "(listed above), and combined shadowing by multiple policies is not "
             "evaluated — so this list can miss cases, but it does not false-positive. "
-            "Routing and NAT are not considered."
+            "Routing and NAT are not considered. Findings marked proof="
+            "'capture' rely on a DNS cache snapshot and are provable as of "
+            "the capture time; proof='config' findings are provable from the "
+            "configuration alone."
         ),
     }

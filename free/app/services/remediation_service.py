@@ -40,8 +40,18 @@ def validate_device_address(ip: str) -> str:
 
     try:
         parsed = ipaddress.ip_address(addr.strip("[]"))
+        # 링크로컬만 막는다. 169.254.169.254는 클라우드 메타데이터 SSRF의
+        # 표준 표적인데, 방화벽을 링크로컬로 관리하는 경우는 없다.
+        # 사설대역(10./192.168.)과 루프백은 **허용해야 한다** — 방화벽은
+        # 대개 사설망에 있고, SSH 터널(-L 8443:fw:443) 경유가 실제 운용
+        # 방식이라 이걸 막으면 정상 사용자가 못 쓴다(재비판 SUSPECT 대응).
+        if parsed.is_link_local:
+            raise ValueError("Link-local addresses are not allowed as a "
+                             "device address")
         return f"[{parsed}]" if parsed.version == 6 else str(parsed)
-    except ValueError:
+    except ValueError as exc:
+        if "Link-local" in str(exc):
+            raise
         pass
 
     if not _HOSTNAME_RE.match(addr):
