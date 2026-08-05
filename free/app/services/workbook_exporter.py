@@ -220,6 +220,7 @@ def build_severity_workbook(result: dict) -> bytes:
 
     _add_notes_sheet(wb, result)
     _add_summary_sheet(wb, result)
+    _add_action_plan_sheet(wb, result)
     _add_unreachable_sheet(wb, result)
 
     buf = BytesIO()
@@ -341,6 +342,123 @@ def _add_summary_sheet(wb: Workbook, result: dict) -> None:
     ws.column_dimensions["A"].width = 34
     ws.column_dimensions["B"].width = 66
     ws.column_dimensions["C"].width = 12
+
+
+# 조치 우선순위. 리스크 제거 효과와 되돌리기 쉬운 순서를 함께 고려한 작업
+# 순서다 — 비활성화는 즉시 되돌릴 수 있고, 삭제 검토는 확인이 선행돼야 한다.
+_CLI_DISABLE = (
+    "config firewall policy\n"
+    " edit {pid}\n"
+    "  set status disable\n"
+    " end")
+_CLI_REMOVE_SVC = (
+    "config firewall policy\n"
+    " edit {pid}\n"
+    "  (remove flagged services from 'set service')\n"
+    " end")
+
+_ACTION_PLAN_ORDER = [
+    ("Disable now",         _CLI_DISABLE),
+    ("Remove service only", _CLI_REMOVE_SVC),
+    ("Disable & monitor",   _CLI_DISABLE),
+    ("Review candidate",    None),
+    ("Needs review",        None),
+    ("Register ticket",     None),
+]
+
+
+def _add_action_plan_sheet(wb: Workbook, result: dict) -> None:
+    """실행 계획 시트 — "무엇이 문제인가"가 아니라 "무엇부터 할 것인가".
+
+    등급·조치 데이터는 이미 다른 시트에 있지만, 사용자는 그걸 작업 목록으로
+    직접 조립해야 했다. 여기서는 조치 우선순위 순으로 정렬하고 담당자·완료·
+    메모 칸을 비워 둬서 시트 자체가 진행 관리 문서가 되게 한다.
+
+    도달불가 정책은 증거가 가장 강하므로(수학적 증명) 맨 위 그룹으로 올리고,
+    아래 조치 그룹에서는 중복을 뺀다. report_meta 있을 때만 생성(회귀 픽스처
+    불변 — Summary와 같은 게이트).
+    """
+    if not result.get("report_meta"):
+        return
+    # 정책 종류를 행에 태깅한다 — proxy 정책의 CLI 네임스페이스는
+    # "firewall proxy-policy"라서, 구분 없이 "firewall policy"를 내면
+    # ID가 충돌하는 무관한 firewall 정책을 끄게 만든다(재비판 NEW-BUG,
+    # 실 config에서 fw/proxy ID 충돌 44건).
+    all_policies = ([{**p, "_ptype": "firewall"} for p in result.get("firewall", [])]
+                    + [{**p, "_ptype": "proxy"} for p in result.get("proxy", [])])
+    reach = result.get("reachability") or {}
+    unreachable = reach.get("unreachable") or []
+    if not all_policies and not unreachable:
+        return
+
+    ws = wb.create_sheet("Action Plan", 1)
+    ws.sheet_view.showGridLines = False
+    headers = ["#", "Priority group", "Policy ID", "Policy Name",
+               "Why (reason)", "Suggested CLI", "Owner", "Done", "Notes"]
+    for col, htxt in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=htxt)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+    r = 2
+    n = 1
+
+    # reachability는 firewall 정책만 검사한다 — ID만으로 중복 제거하면
+    # 같은 번호의 proxy 정책 조치가 소리 없이 사라진다(재비판 NEW-BUG).
+    unreachable_ids = {u.get("policy_id") for u in unreachable}
+    for u in unreachable:
+        ws.cell(row=r, column=1, value=n)   # 숫자로 저장해야 필터 정렬이 맞다
+        write_text_cell(ws, r, 2, "Unreachable (provably never matches)")
+        # 가장 강한 증거 그룹이 가장 밋밋하면 시각 위계가 역전된다
+        ws.cell(row=r, column=2).fill = SEVERITY_FILLS[1]
+        write_text_cell(ws, r, 3, str(u.get("policy_id", "")))
+        write_text_cell(ws, r, 4, str(u.get("name", "")))
+        write_text_cell(ws, r, 5,
+                        f"Shadowed by policy {u.get('shadowed_by')} — every packet "
+                        "it could match is handled above it")
+        write_text_cell(ws, r, 6, _CLI_DISABLE.format(pid=u.get("policy_id", "")))
+        r += 1; n += 1
+
+    by_label: dict = {}
+    for p in all_policies:
+        label = p.get("action_label") or ""
+        if p.get("_ptype") == "firewall" and p.get("policy_id") in unreachable_ids:
+            continue
+        by_label.setdefault(label, []).append(p)
+
+    for label, cli_tpl in _ACTION_PLAN_ORDER:
+        for p in by_label.get(label, []):
+            ws.cell(row=r, column=1, value=n)
+            write_text_cell(ws, r, 2, label)
+            write_text_cell(ws, r, 3, str(p.get("policy_id", "")))
+            write_text_cell(ws, r, 4, str(p.get("name", "")))
+            write_text_cell(ws, r, 5, str(p.get("reason", "")))
+            if cli_tpl:
+                tpl = cli_tpl if p.get("_ptype") != "proxy"                       else cli_tpl.replace("config firewall policy",
+                                           "config firewall proxy-policy")
+                write_text_cell(ws, r, 6, tpl.format(pid=p.get("policy_id", "")))
+            sev = p.get("urgency", 0)
+            ws.cell(row=r, column=2).fill = SEVERITY_FILLS.get(sev, SEVERITY_FILLS[0])
+            r += 1; n += 1
+
+    # 다중행 CLI가 한 줄로 뭉개지지 않게 전 데이터 셀에 wrap (재비판 NEW-BUG)
+    for row in ws.iter_rows(min_row=2, max_row=max(r - 1, 2), max_col=9):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+    if r > 2:
+        ws.auto_filter.ref = f"A1:I{r - 1}"
+        r += 1
+        note = ws.cell(row=r, column=1, value=(
+            "Note: on multi-VDOM devices, enter the policy's VDOM first "
+            "(config vdom / edit <name>) before running these commands. "
+            "Review each change with the policy owner; disabling is reversible, "
+            "deletion is not."))
+        note.alignment = Alignment(wrap_text=True)
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
+    for col, w in (("A", 6), ("B", 26), ("C", 10), ("D", 32), ("E", 48),
+                   ("F", 34), ("G", 14), ("H", 8), ("I", 24)):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
 
 
 def _add_unreachable_sheet(wb: Workbook, result: dict) -> None:
