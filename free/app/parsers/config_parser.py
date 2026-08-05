@@ -16,6 +16,10 @@ TARGET_SECTIONS = {
     "config firewall proxy-addrgrp": "firewall_proxy_addrgrp",
     "config firewall service custom": "firewall_service_custom",
     "config firewall service group": "firewall_service_group",
+    "config firewall vip": "firewall_vip",
+    "config firewall vipgrp": "firewall_vipgrp",
+    "config firewall wildcard-fqdn custom": "firewall_wildcard_fqdn",
+    "config firewall wildcard-fqdn group": "firewall_wildcard_fqdn_group",
     "config system interface": "system_interface",
 }
 
@@ -38,6 +42,10 @@ class ParseState:
             "firewall_proxy_addrgrp": [],
             "firewall_service_custom": [],
             "firewall_service_group": [],
+            "firewall_vip": [],
+            "firewall_vipgrp": [],
+            "firewall_wildcard_fqdn": [],
+            "firewall_wildcard_fqdn_group": [],
             "system_interface": [],
             "parse_warnings": [],
         }
@@ -202,6 +210,22 @@ class FortiGateConfigParser:
                 if isinstance(value, list):
                     item[key] = " ".join(str(v) for v in value)
             item["resolved"] = self._render_service(item)
+
+        elif section == "firewall_vip":
+            item["name"] = item.get("_edit", "")
+            # mappedip는 단일 IP·범위("a-b")·복수 표기가 가능하다. 리스트로 정규화.
+            m = item.get("mappedip", [])
+            item["mappedip"] = [m] if isinstance(m, str) else (m or [])
+
+        elif section in {"firewall_vipgrp", "firewall_wildcard_fqdn_group"}:
+            item["name"] = item.get("_edit", "")
+            members = item.get("member", [])
+            if isinstance(members, str):
+                members = [members]
+            item["member"] = members
+
+        elif section == "firewall_wildcard_fqdn":
+            item["name"] = item.get("_edit", "")
 
         elif section == "firewall_service_group":
             item["name"] = item.get("_edit", "")

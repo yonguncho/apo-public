@@ -19,6 +19,15 @@ accept든 deny든 마찬가지다(B는 아예 평가되지 않는다).
   - IPv4 firewall_policy만 다룬다. IPv6·프록시 정책은 제외.
   - 경로 분석이 아니다. 라우팅·NAT·존 토폴로지는 보지 않으며, 그런 분석이
     필요한 판정(NSPM의 상관분석)은 이 도구의 범위 밖이다.
+
+VIP(DNAT) 관련 안전성 논거 (v78 자체 검증):
+  - central-NAT 모드에서는 정책이 VIP 객체를 dstaddr로 참조하지 않으므로
+    이 모듈의 VIP 로직은 발동하지 않는다 — 일반 주소 분석만 적용되어 안전.
+  - VIP의 extintf 바인딩은 DNAT 대상 트래픽을 *줄이는* 제약이다. 포함 판정은
+    정책이 선언한 인터페이스 공간 기준이므로, 실제 매칭 공간이 그보다 작아도
+    "위 정책이 전부 가린다"는 결론은 유지된다(미탐은 가능해도 오탐은 없음).
+  - mappedip 하위 테이블 문법(config mappedip)은 현재 파서가 값을 남기지
+    않아 환원 불가 → 스킵으로 빠진다(오탐 없음, 후속 엔트리 오염 없음 확인).
 """
 from __future__ import annotations
 
@@ -137,6 +146,98 @@ def build_address_map(parsed: dict) -> dict[str, list[tuple[int, int]] | None]:
     for gname in groups:
         resolve_group(gname, frozenset())
     return out
+
+
+def _parse_ip_or_range(text: str):
+    """'1.2.3.4' 또는 '1.2.3.4-1.2.3.10' -> (lo, hi) | None."""
+    try:
+        t = str(text).strip()
+        if "-" in t:
+            a, b = t.split("-", 1)
+            lo, hi = int(ipaddress.IPv4Address(a.strip())), int(ipaddress.IPv4Address(b.strip()))
+            return (lo, hi) if lo <= hi else None
+        v = int(ipaddress.IPv4Address(t))
+        return (v, v)
+    except (ValueError, ipaddress.AddressValueError):
+        return None
+
+
+def build_vip_map(parsed: dict):
+    """VIP·VIP그룹 이름 -> mappedip 구간 목록 (환원 불가 시 None).
+
+    ★ extip이 아니라 mappedip인 이유: FortiGate는 정책 조회 *전에* DNAT를
+    수행하므로, 정책 매칭 시점의 목적지는 이미 변환된 mappedip이다. extip으로
+    비교하면 "extip만 덮고 mappedip은 못 덮는 위 정책"을 shadower로 오판해
+    오탐이 생긴다 — 이 모듈의 "오탐 0" 보장을 깨는 지점이라 가장 조심해야 한다.
+
+    보수적 제외(환원 불가 처리): port-forward VIP(서비스 포트까지 변환되어
+    서비스 포함관계가 성립하지 않음), static-nat 이외의 type(load-balance/
+    dns 등), mappedip 파싱 실패.
+    """
+    out: dict[str, Any] = {}
+    for item in parsed.get("firewall_vip", []) or []:
+        name = item.get("name") or item.get("_edit") or ""
+        if not name:
+            continue
+        vtype = str(item.get("type", "static-nat")).lower()
+        if vtype not in ("static-nat", ""):
+            out[name] = None
+            continue
+        if str(item.get("portforward", "")).lower() == "enable":
+            out[name] = None
+            continue
+        acc = []
+        ok = True
+        for m in item.get("mappedip", []) or []:
+            r = _parse_ip_or_range(m)
+            if r is None:
+                ok = False
+                break
+            acc.append(r)
+        out[name] = _merge_intervals(acc) if (ok and acc) else None
+
+    groups = {
+        (g.get("name") or g.get("_edit") or ""): (g.get("member") or [])
+        for g in parsed.get("firewall_vipgrp", []) or []
+    }
+
+    def resolve_group(name: str, stack: frozenset):
+        if name in out:
+            return out[name]
+        members = groups.get(name)
+        if members is None or name in stack:
+            return None
+        acc = []
+        for m in members:
+            r = resolve_group(m, stack | {name})
+            if r is None:
+                out[name] = None
+                return None
+            acc.extend(r)
+        out[name] = _merge_intervals(acc)
+        return out[name]
+
+    for gname in groups:
+        resolve_group(gname, frozenset())
+    return out
+
+
+def collect_dns_object_names(parsed: dict) -> set:
+    """FQDN·wildcard-FQDN 계열 객체 이름 — 실행 시점 DNS로만 결정되므로
+    오프라인 환원이 원리적으로 불가능하다. '미정의'와 구분해 사유를 정확히
+    말하기 위해 수집한다."""
+    names = set()
+    for item in parsed.get("firewall_address", []) or []:
+        if item.get("type") in ("fqdn", "wildcard-fqdn", "geography", "dynamic"):
+            n = item.get("name") or item.get("_edit")
+            if n:
+                names.add(n)
+    for key in ("firewall_wildcard_fqdn", "firewall_wildcard_fqdn_group"):
+        for item in parsed.get(key, []) or []:
+            n = item.get("name") or item.get("_edit")
+            if n:
+                names.add(n)
+    return names
 
 
 def _policy_addr_intervals(names: list[str], addr_map: dict):
@@ -320,8 +421,65 @@ def _intf_covers(cover: list[str], target: list[str]) -> bool:
 # 본 판정
 # ---------------------------------------------------------------------------
 
-def _policy_space(p: dict, addr_map: dict, svc_map: dict):
+def _policy_dst_space(names: list[str], addr_map: dict, vip_map: dict):
+    """dstaddr 해석. (구간|UNIVERSE|None, uses_vip) 반환.
+
+    이름이 주소와 VIP 양쪽에 존재하면 어느 쪽을 참조하는지 확정할 수 없으므로
+    환원 불가로 처리한다(추측 금지).
+    """
+    acc: list[tuple[int, int]] = []
+    uses_vip = False
+    for n in names or []:
+        if str(n).lower() in ("all", "any"):
+            return UNIVERSE, uses_vip
+        in_addr = addr_map.get(n) is not None or n in addr_map
+        in_vip = n in vip_map
+        if in_addr and in_vip:
+            return None, uses_vip
+        if in_vip:
+            r = vip_map.get(n)
+            if r is None:
+                return None, True
+            uses_vip = True
+            acc.extend(r)
+            continue
+        r = addr_map.get(n)
+        if r is None:
+            return None, uses_vip
+        acc.extend(r)
+    if not acc:
+        return None, uses_vip
+    return _merge_intervals(acc), uses_vip
+
+
+def _addr_fail_reason(names, addr_map: dict, vip_map: dict, dns_names: set,
+                      side: str) -> str:
+    """환원 실패 사유를 정확히 말한다 — 'DNS라서 원리적으로 불가'와
+    '이 config에 정의가 없음'과 'VIP 형태상 불가'는 다른 사실이다."""
+    for n in names or []:
+        if str(n).lower() in ("all", "any"):
+            continue
+        if n in dns_names:
+            return (f"{side} address resolves via DNS at runtime "
+                    "(FQDN / wildcard-FQDN / geography) — cannot be reduced offline")
+        if n in vip_map and vip_map.get(n) is None:
+            return (f"{side} address uses a VIP this analysis cannot reduce "
+                    "(port-forward, load-balance, or unparsable mappedip)")
+        if n in addr_map and addr_map.get(n) is None:
+            return (f"{side} address object (or a member of its group) cannot "
+                    "be reduced to IP ranges — typically an FQDN/geography-type "
+                    "member")
+        if n not in addr_map and n not in vip_map:
+            return (f"{side} address references an object not defined in the "
+                    "parsed configuration")
+    return f"{side} address cannot be reduced to IP ranges"
+
+
+def _policy_space(p: dict, addr_map: dict, svc_map: dict,
+                  vip_map: dict | None = None, dns_names: set | None = None):
     """정책 -> 매칭 공간 dict. 환원 불가면 (None, 사유)."""
+    vip_map = vip_map or {}
+    dns_names = dns_names or set()
     for key, why in _UNRESOLVABLE_POLICY_KEYS.items():
         val = p.get(key)
         if val in (None, "", [], "disable"):
@@ -329,14 +487,12 @@ def _policy_space(p: dict, addr_map: dict, svc_map: dict):
         return None, why
     src = _policy_addr_intervals(p.get("srcaddr"), addr_map)
     if src is None:
-        return None, ("source address cannot be reduced to IP ranges "
-                      "(FQDN/geography/dynamic, a VIP, or an object type this "
-                      "analysis does not resolve)")
-    dst = _policy_addr_intervals(p.get("dstaddr"), addr_map)
+        return None, _addr_fail_reason(p.get("srcaddr"), addr_map, vip_map,
+                                       dns_names, "source")
+    dst, uses_vip = _policy_dst_space(p.get("dstaddr"), addr_map, vip_map)
     if dst is None:
-        return None, ("destination address cannot be reduced to IP ranges "
-                      "(FQDN/geography/dynamic, a VIP, or an object type this "
-                      "analysis does not resolve)")
+        return None, _addr_fail_reason(p.get("dstaddr"), addr_map, vip_map,
+                                       dns_names, "destination")
     svc = _policy_service_tuples(p.get("service"), svc_map)
     if svc is None:
         return None, "service cannot be reduced to protocol/port sets (undefined or unsupported object)"
@@ -344,6 +500,12 @@ def _policy_space(p: dict, addr_map: dict, svc_map: dict):
         "srcintf": p.get("srcintf") or [],
         "dstintf": p.get("dstintf") or [],
         "src": src, "dst": dst, "svc": svc,
+        # VIP 목적지는 DNAT 이후(mappedip) 공간이다. FortiGate에서 dst=VIP
+        # 정책은 해당 VIP로 DNAT된 트래픽만 매칭하므로:
+        #  - 이 정책은 일반(비 DNAT) 트래픽의 shadower가 될 수 없다
+        #  - 이 정책을 가리는 shadower는 accept여야 한다 (deny는 match-vip
+        #    없이 VIP 트래픽을 매칭하지 않는다)
+        "vip_dst": uses_vip,
     }, None
 
 
@@ -360,6 +522,8 @@ def detect_unreachable(parsed: dict) -> dict:
     policies = parsed.get("firewall_policy", []) or []
     addr_map = build_address_map(parsed)
     svc_map = build_service_map(parsed)
+    vip_map = build_vip_map(parsed)
+    dns_names = collect_dns_object_names(parsed)
 
     unreachable = []
     skipped = []
@@ -370,11 +534,16 @@ def detect_unreachable(parsed: dict) -> dict:
     for p in policies:
         status = str(p.get("status", "enable")).lower()
         schedule = p.get("schedule") or "always"
-        space, why = _policy_space(p, addr_map, svc_map)
+        space, why = _policy_space(p, addr_map, svc_map, vip_map, dns_names)
 
         if space is not None and status in ("enable", "enabled", ""):
             checked += 1
             for sp_pol, sp in shadowers:
+                # VIP 타깃은 accept shadower만 유효 — deny는 match-vip 없이
+                # DNAT 트래픽을 매칭하지 않는다 (오탐 방지)
+                if space.get("vip_dst") and \
+                        str(sp_pol.get("action", "")).lower() != "accept":
+                    continue
                 if _space_covers(sp, space):
                     unreachable.append({
                         "policy_id": p.get("policy_id"),
@@ -393,10 +562,13 @@ def detect_unreachable(parsed: dict) -> dict:
             skipped.append({"policy_id": p.get("policy_id"),
                             "name": p.get("name", ""), "reason": why})
 
-        # shadower 자격: 환원 가능 + 활성 + 상시 스케줄.
-        # 스케줄이 있는 정책은 꺼져 있는 시간대에 아래 정책이 매칭될 수 있다.
+        # shadower 자격: 환원 가능 + 활성 + 상시 스케줄 + 비 VIP 목적지.
+        # 스케줄 정책은 꺼진 시간대에 아래 정책이 매칭될 수 있고, VIP 목적지
+        # 정책은 DNAT된 트래픽만 매칭하므로 일반 트래픽을 가리지 못한다
+        # (mappedip 공간을 일반 공간처럼 쓰면 오탐).
         if space is not None and status in ("enable", "enabled", "") \
-                and str(schedule).lower() == "always":
+                and str(schedule).lower() == "always" \
+                and not space.get("vip_dst"):
             shadowers.append((p, space))
 
     return {
