@@ -202,7 +202,11 @@ def build_severity_workbook(result: dict) -> bytes:
                 val = p.get(field, "")
                 if isinstance(val, list):
                     val = ", ".join(str(v) for v in val)
-                cell = write_text_cell(ws, row_idx, col_idx, str(val) if val else "")
+                # Hit=0(미사용 확정)과 None(데이터 없음)은 다른 사실이다.
+                # 0을 falsy로 지우면 이 구분이 엑셀에서 소멸한다(재비판 4b).
+                cell = write_text_cell(
+                    ws, row_idx, col_idx,
+                    str(val) if (val or val == 0) and val is not False else "")
                 cell.fill = fill
         for col in ws.columns:
             max_len = max((len(str(c.value or "")) for c in col), default=10)

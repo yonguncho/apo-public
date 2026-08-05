@@ -70,7 +70,9 @@ def _compute_config_diff(old_data, new_data):
         else:
             if _simplify_policy_for_compare(old_policies[pid]) != _simplify_policy_for_compare(policy):
                 changed_policies.append({
-                    "policy_id": pid,
+                    # added/removed는 정책 객체의 int ID를 그대로 내는데 여기만
+                    # 맵 키(str)를 내고 있었다(감사 C6). 타입을 맞춘다.
+                    "policy_id": int(pid) if str(pid).isdigit() else pid,
                     "name": policy.get("name") or old_policies[pid].get("name") or "",
                     "before": old_policies[pid],
                     "after": policy,
@@ -178,7 +180,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v73-2026-08-04"
+APO_VERSION = "v74-2026-08-05"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -413,7 +415,11 @@ def create_app() -> Flask:
         app.config['last_runtime_stats'] = existing
         summary = {
             "count": len(merged),
-            "matched_policy_ids": sorted(merged.keys(), key=lambda x: int(x) if x.isdigit() else x),
+            # int/str 혼합 정렬 금지 — CSV에 비숫자 ID가 한 건이라도 있으면
+            # int(x)와 str이 비교돼 TypeError 500이 났다(감사 C1). 튜플 키로 분리.
+            "matched_policy_ids": sorted(
+                merged.keys(),
+                key=lambda x: (0, int(x)) if str(x).isdigit() else (1, str(x))),
         }
         return jsonify({"runtime_stats": merged, "summary": summary})
 
@@ -559,6 +565,10 @@ def create_app() -> Flask:
         gate = _license_required()
         if gate:
             return gate
+        # config 없이 내려가는 '빈 감사 보고서'는 문서정보(SHA·장비)가 공란인
+        # 채 형식만 갖춰서 더 위험하다(감사 C2). 다른 분석 라우트와 동일하게 막는다.
+        if not app.config.get('last_parsed'):
+            return jsonify({"error": "No config loaded. Upload a config file first."}), 400
         from app.services.workbook_exporter import build_severity_workbook
         payload = request.get_json(silent=True) or {}
         # 문서 정보는 서버가 주입한다 — 감사 보고서는 "무엇을, 어떤 기준으로,

@@ -25,7 +25,13 @@ _TICKET_PATTERN = _compile_ticket_pattern()
 _YYMMDD_PATTERN = re.compile(r"^\d{6}$")
 
 
-def _parse_yymmdd(token: str) -> date | None:
+def _parse_yymmdd(token: str, past_only: bool = False) -> date | None:
+    """YYMMDD -> date. 기본은 20xx 고정(만료일·스케줄 — 미래가 정상).
+
+    past_only=True는 등록일용: 등록일은 과거일 수밖에 없으므로 20xx 해석이
+    내년보다 뒤면 19xx로 본다. "991231"을 2099로 읽으면 age가 음수가 되어
+    미사용 정책이 신규로 강등된다(감사 A4).
+    """
     token = (token or "").strip()
     if not _YYMMDD_PATTERN.match(token):
         return None
@@ -34,6 +40,8 @@ def _parse_yymmdd(token: str) -> date | None:
         mm = int(token[2:4])
         dd = int(token[4:6])
         year = 2000 + yy
+        if past_only and year > date.today().year + 1:
+            year -= 100
         return date(year, mm, dd)
     except (ValueError, TypeError):
         return None
@@ -71,14 +79,14 @@ def extract_name_metadata(name: str, schedule: str | None = None) -> dict[str, A
 
     parts = [p.strip() for p in name.split("_") if p.strip()]
     if parts:
-        date_from_name = _parse_yymmdd(parts[0])
+        date_from_name = _parse_yymmdd(parts[0], past_only=True)
         if date_from_name:
             result["request_date"] = date_from_name
         if len(parts) >= 3:
             result["requester"] = parts[2]
 
-    if result["request_date"] is None and schedule:
-        result["request_date"] = _parse_yymmdd(str(schedule).strip())
+    # 스케줄(=만료일)을 등록일로 쓰지 않는다(감사 A12) — 미래 등록일이 생겨
+    # age가 음수가 되고 "신규"로 오판된다. 등록일 미상은 미상으로 둔다.
 
     return result
 

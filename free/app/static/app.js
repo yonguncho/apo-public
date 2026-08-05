@@ -712,7 +712,7 @@ downloadWorkbookBtn.addEventListener('click', async () => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) { alert('Failed to build workbook export.'); return; }
+  if (!res.ok) { await alertApiError(res, 'Failed to build workbook export.'); return; }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -740,6 +740,15 @@ let _licensed = null;  // null=미확인, true/false
 let _pendingExportBtnId = null;  // 게이트를 띄운 export 버튼 id (활성화 후 재실행용)
 
 // Export 대상 버튼 ID 목록 (CSV 포함 전체 게이트)
+
+// 실패 응답의 서버측 사유({"error":...})를 사용자에게 보여준다.
+// 일반 문구만 내면 402(라이선스)조차 "고장"으로 읽힌다.
+async function alertApiError(res, fallback) {
+  let msg = fallback;
+  try { const d = await res.json(); if (d && d.error) msg = d.error; } catch (_) {}
+  alert(msg);
+}
+
 const EXPORT_BTN_IDS = ['downloadCsvBtn', 'downloadWorkbookBtn', 'sevExportBtn', 'remExportCsvBtn', 'remExportJsonBtn'];
 
 function setExportBtnsState(licensed) {
@@ -1106,10 +1115,13 @@ document.addEventListener('click', e => {
   async function runClassify() {
     if (statusEl) statusEl.textContent='Classifying...';
     try {
-      await fetch('/api/user-ranges/set',{
+      const rangeRes = await fetch('/api/user-ranges/set',{
         method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({ranges:userRanges.map(r=>r.cidr)}),
       });
+      // 범위 설정이 실패했는데 분류를 계속하면 traffic type이 전부 Unknown이
+      // 되어 조용히 틀린 결과가 나온다(감사 C3). 여기서 멈춘다.
+      if (!rangeRes.ok) throw new Error('Failed to set User IP ranges — classification aborted.');
       // 패널 기본값을 아직 못 읽었으면 임계값을 보내지 않는다 —
       // 비어 있는 값이 프로파일 설정을 null로 덮어쓰는 것을 막는다.
       const res = await fetch('/api/severity/classify',{
@@ -1180,7 +1192,7 @@ document.addEventListener('click', e => {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify(sevData),
     });
-    if (!res.ok){alert('Export failed.');return;}
+    if (!res.ok){ await alertApiError(res, 'Export failed.'); return; }
     const blob=await res.blob();
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
@@ -1565,7 +1577,7 @@ document.addEventListener('click', e => {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({to_disable: _candidates.to_disable, already_disabled: _candidates.already_disabled})
     });
-    if(!r.ok){ alert('CSV export failed'); return; }
+    if(!r.ok){ await alertApiError(r, 'CSV export failed'); return; }
     const blob = await r.blob();
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -1582,7 +1594,7 @@ document.addEventListener('click', e => {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({policies})
     });
-    if(!r.ok){ alert('JSON export failed'); return; }
+    if(!r.ok){ await alertApiError(r, 'JSON export failed'); return; }
     const blob = await r.blob();
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');

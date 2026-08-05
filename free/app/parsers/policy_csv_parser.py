@@ -99,23 +99,25 @@ class PolicyStatsCsvParser:
                 return match.group(1)
         return None
 
-    def _extract_hit_count(self, row: dict[str, Any], header_map: dict[str, str]) -> int:
+    def _extract_hit_count(self, row: dict[str, Any], header_map: dict[str, str]) -> int | None:
+        # 빈 셀·쓰레기를 0으로 돌려주면 "데이터 없음"이 "미사용 확정(Hit=0)"으로
+        # 승격돼 Critical 오판으로 이어진다(감사 A5 잔여, 재비판 SUSPECT).
         header = header_map.get("hit_count")
         raw = str(row.get(header, "")).strip() if header else ""
-        if not raw:
-            return 0
+        if not raw or raw in ("-", "N/A", "n/a"):
+            return None
         raw = raw.replace(",", "")
         try:
             value = float(raw)
         except (ValueError, OverflowError):
-            return 0
+            return None
         # float("1e400") -> inf, int(inf) -> OverflowError. nan도 마찬가지.
         if not math.isfinite(value):
-            return 0
+            return None
         try:
             return int(value)
         except (ValueError, OverflowError):
-            return 0
+            return None
 
     def _extract_last_used(self, row: dict[str, Any], header_map: dict[str, str]) -> str:
         header = header_map.get("last_used")

@@ -155,8 +155,11 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
     status       = (policy.get("status") or "").lower()
     schedule_val = policy.get("schedule") or "always"
     hit_count_raw = policy.get("hit_count")
-    hit_count_known = hit_count_raw is not None   # False = CSV 미로드
-    hit_count    = _int(hit_count_raw)
+    # "1,234" 같은 문자열이 int() 실패로 0이 되면 실사용 정책이 "Hit=0
+    # (Unused)" Critical이 된다(감사 A5). 파싱 실패는 0이 아니라 '미상'이다.
+    hit_count    = _parse_hit(hit_count_raw)
+    hit_count_known = hit_count is not None
+    hit_count    = hit_count or 0
     last_used    = _parse_date(policy.get("last_used"))
     request_date = _parse_date(policy.get("request_date"))
     ritm         = policy.get("ritm")
@@ -177,7 +180,7 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
     is_always      = is_always_schedule(schedule_val)
     sched_date     = get_schedule_date(schedule_val)
     all_temp_kw    = customer_rules.get("temp_keywords", []) + customer_rules.get("extra_temp_keywords", [])
-    has_temp_kw    = any(kw.lower() in name.lower() for kw in all_temp_kw)
+    has_temp_kw    = any(_kw_in_name(name, kw) for kw in all_temp_kw)
     has_controlled = any(kw.lower() in name.lower() for kw in CONTROLLED_KW)
 
     tags = _compute_tags(
@@ -196,21 +199,27 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
             "traffic_type": traffic_type, "color": color, "tags": tags,
         }
 
+    if action != "accept":   # "deny", "" 빈 값 모두 deny 정책으로 처리
+        return done(7, f"Action = Deny ('{action}')")
+    # Disabled 정책은 예외 규칙들보다 우선 → 항상 2 (Deny만 그보다 먼저 7)
+    if status in ("disabled", "disable"):
+        return done(2, "Status = Disabled")
+    # 판정 순서 원칙(감사 A6·A7 + 재비판): 사실(deny·disabled)이 먼저,
+    # 그다음 고객의 명시 지정(override), 그다음 '항상 Critical' 고위험 객체,
+    # ICMP 예외 같은 일반 면제 규칙은 그 뒤다. 명시 지정이 일반 면제에
+    # 지면 설정한 사람 입장에서 오버라이드가 소리 없이 무시된다.
     for obj, sev in customer_rules.get("severity_overrides", {}).items():
         if _in_obj(obj, name, src_list, dst_list):
             return done(sev, f"Override: {obj} -> {sev}")
-
-    if action != "accept":   # "deny", "" 빈 값 모두 deny 정책으로 처리
-        return done(7, f"Action = Deny ('{action}')")
+    for obj in customer_rules.get("high_risk_objects", []):
+        if _in_obj(obj, name, src_list, dst_list):
+            return done(1, f"High-risk object: {obj}")
     # ICMP 전용 정책을 판정 대상에서 뺄지는 방화벽 위치에 달렸다.
     # NIST SP 800-41 r1 §4.1.4는 ICMP 전면 차단이 진단·성능 문제를 일으킨다고
     # 하면서도, 경계 방화벽에서는 허용 타입 외 차단을 권고한다. 내부 방화벽에서만
     # 타당한 규칙이라 프로파일로 켜고 끈다.
     if is_icmp_only and icmp_only_is_keep:
         return done(7, "Service = ICMP only")
-    # Disabled 정책은 유효 티켓/관리자/특례 객체 규칙보다 우선 → 항상 2 (Deny/ICMP-only는 예외적으로 그보다 먼저 7 처리)
-    if status in ("disabled", "disable"):
-        return done(2, "Status = Disabled")
     if has_ritm and not is_expired:
         return done(7, f"Valid ITS: {ritm}, Schedule valid")
     if is_any_all and has_controlled:
@@ -232,9 +241,6 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
                 )
             return done(7, f"Admin policy — keep ({obj})")
 
-    for obj in customer_rules.get("high_risk_objects", []):
-        if _in_obj(obj, name, src_list, dst_list):
-            return done(1, f"High-risk object: {obj}")
     if is_risky:
         found = set(expanded_svcs) & risky_services
         non_risky = [s for s in expanded_svcs if s and s not in risky_services]
@@ -265,7 +271,19 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
             if traffic_type == "Server-Server":
                 return done(4, f"Src/Dst Any·All + active (within {dorm_lbl}) + S-S")
             return done(3, f"Src/Dst Any·All + active (within {dorm_lbl})")
-        return done(1, "Src/Dst Any·All + unused or long inactive")
+        if not hit_count_known:
+            # 광범위 허용 + 사용량 미상 — 미사용 '확정' 서술 금지(감사 A2).
+            # Any/All 자체가 검토 사유이므로 3으로 두고 CSV 로드를 안내한다.
+            return done(3, "Src/Dst Any·All + usage unknown (no usage data) — review")
+        if hit_count == 0:
+            reason = "Src/Dst Any·All + unused (Hit=0)"
+        elif last_used:
+            reason = f"Src/Dst Any·All + dormant (last used > {dorm_lbl})"
+        else:
+            # 기록 없음 ≠ 장기 미사용 확정 (재비판 NEW-BUG). 등급 근거는
+            # 광범위 허용 + 활성 사용 증거 부재이므로 1을 유지하되 정직하게 쓴다.
+            reason = "Src/Dst Any·All + Hit>0 but no last-used record"
+        return done(1, reason)
 
     if svc_any:   # 서비스만 ALL인 경우
         if is_ad_dns:
@@ -276,7 +294,17 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
             if traffic_type == "Server-Server":
                 return done(4, f"Service ALL + active (within {dorm_lbl}) + S-S")
             return done(3, f"Service ALL + active (within {dorm_lbl})")
-        return done(1, "Service ALL + unused or long inactive")
+        if not hit_count_known:
+            return done(3, "Service ALL + usage unknown (no usage data) — review")
+        if hit_count == 0:
+            reason = "Service ALL + unused (Hit=0)"
+        elif last_used:
+            reason = f"Service ALL + dormant (last used > {dorm_lbl})"
+        else:
+            # 기록 없음 ≠ 장기 미사용 확정 (재비판 NEW-BUG). 등급 근거는
+            # 광범위 허용 + 활성 사용 증거 부재이므로 1을 유지하되 정직하게 쓴다.
+            reason = "Service ALL + Hit>0 but no last-used record"
+        return done(1, reason)
     if has_temp_kw and not has_ritm:
         if hit_count_known and hit_count > 0:
             if last_used and not _within_yrs(last_used, today, dorm_yrs):
@@ -292,8 +320,12 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
             if traffic_type == "Server-User":
                 return done(5, f"Temp+NoTicket, Hit>0, Last Used within {dorm_lbl}, S-U")
             return done(6, f"Temp+NoTicket, Hit>0, Last Used within {dorm_lbl}, S-S")
-        reason_sfx = "CSV Not Loaded" if not hit_count_known else "Hit=0 (Unused)"
-        return done(1, f"Temp+NoTicket, {reason_sfx}")
+        if hit_count_known:
+            return done(1, "Temp+NoTicket, Hit=0 (Unused)")
+        # 사용량 미상(CSV 미로드)을 '미사용 확정'으로 승격하지 않는다(감사 A1,
+        # KNOWN_LIMITATIONS "No record ≠ not used"). 임시 명명+무티켓 자체는
+        # 검토 사유이므로 3(Needs review)으로 남긴다.
+        return done(3, "Temp+NoTicket, usage unknown (no usage data) — review")
 
     if is_expired:
         return done(2, f"Schedule expired: {schedule_val}")
@@ -311,11 +343,12 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
                     return done(2, f"Hit=0, Accept, S-S, always, age={_fmt(age)}yr > 1")
             else:
                 if sched_date:
+                    # 만료된 스케줄은 위에서 이미 2로 확정됐으므로 여기 오는
+                    # sched_date는 항상 미래다(sched_age < 0). 과거 스케줄용
+                    # 상향(4) 분기는 도달 불가라 제거했다 — YYMMDD 전수 실험으로
+                    # 확인(감사 A10). inventory.md R18의 2/4/6 서술은 2/6이 실제다.
                     sched_age = (today - sched_date).days / 365.25
-                    if sched_age > ss_sched_age_years:
-                        return done(4, f"Hit=0, S-S, sched_age={_fmt(sched_age)}yr > {ss_sched_age_years} -> 4")
-                    else:
-                        return done(6, f"Hit=0, S-S, sched_age={_fmt(sched_age)}yr <= {ss_sched_age_years} -> 6")
+                    return done(6, f"Hit=0, S-S, sched_age={_fmt(sched_age)}yr <= {ss_sched_age_years} -> 6")
                 else:
                     if age > 1:
                         return done(2, f"Hit=0, S-S, age={_fmt(age)}yr > 1")
@@ -351,8 +384,9 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
         if _in_obj(obj, name, src_list, dst_list):
             return done(5, f"User-segment object: {obj}")
     if traffic_type == "Server-User":
-        age = _age(request_date, today) or 0
-        if not has_ritm and age <= 1:
+        age = _age(request_date, today)
+        # 등록일 미상을 0년(신규)으로 단정하면 사유가 거짓이 된다(감사 A9).
+        if not has_ritm and age is not None and age <= 1:
             return done(5, "S-U, within 1yr, No ticket ID")
         return done(5, "S-U fallback")
 
@@ -365,8 +399,8 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
         if _in_obj(obj, name, src_list, dst_list):
             return done(6, f"Mgmt-segment object: {obj}")
     if traffic_type == "Server-Server":
-        age = _age(request_date, today) or 0
-        if not has_ritm and age <= 2:
+        age = _age(request_date, today)
+        if not has_ritm and age is not None and age <= 2:
             return done(6, "S-S, within 2yr, No ticket ID")
         if hit_count_known and hit_count >= 50:
             return done(6, f"S-S, Hit {hit_count} >= 50")
@@ -391,7 +425,7 @@ def _compute_tags(status, action, hit_count, hit_count_known, last_used_dt,
         tags.append("No Name")
     if not ritm:
         tags.append("No Ticket")
-    if any(kw.lower() in name.lower() for kw in all_temp_kw):
+    if any(_kw_in_name(name, kw) for kw in all_temp_kw):
         tags.append("Temp Rule")
     if set(expanded_svcs) & RISKY_SERVICES:
         tags.append("Risky Service")
@@ -400,6 +434,27 @@ def _compute_tags(status, action, hit_count, hit_count_known, last_used_dt,
     if bool(expanded_svcs) and set(expanded_svcs) <= ICMP_SERVICES:
         tags.append("ICMP Only")
     return tags
+
+
+import re as _re
+
+def _kw_in_name(name: str, kw: str) -> bool:
+    """임시 키워드 매칭 — 영문 키워드는 단어 경계 필수.
+
+    단순 부분문자열이면 "G**old**mine", "con**test**"가 임시 정책으로
+    오판돼 Critical이 된다(감사 A3). 비ASCII(한글) 키워드는 언어 특성상
+    경계 개념이 약해 부분 매칭을 유지한다.
+    """
+    if not name or not kw:
+        return False
+    if _re.search(r"[A-Za-z]", kw):
+        # 경계는 '문자'만 본다. 숫자를 경계에 넣으면 "temp2"·"test11" 같은
+        # 번호 붙은 임시 명명이 전부 미탐된다(재비판 NEW-BUG, 실 config
+        # policy 1297 "test11"에서 발생). "attempt"(문자 연속)는 여전히 미매칭.
+        return bool(_re.search(
+            r"(?<![A-Za-z])" + _re.escape(kw) + r"(?![A-Za-z])",
+            name, _re.IGNORECASE))
+    return kw in name
 
 
 def _is_any(val) -> bool:
@@ -414,16 +469,48 @@ def _in_obj(obj: str, name: str, src, dst) -> bool:
     return any(obj.lower() in str(t).lower() for t in targets)
 
 def _expand(svc_list, svc_groups: dict) -> list:
-    result = []
-    for s in (svc_list or []):
-        result.extend(svc_groups.get(s, [s]))
-    return list(set(result))
+    """서비스 목록 전개 — 중첩 그룹 재귀 (순환 안전).
+
+    1단계 전개만 하면 그룹 속 그룹의 TELNET 같은 위험 서비스를 놓친다
+    (감사 A8). 파서의 expand_services와 같은 의미론으로 맞춘다.
+    """
+    out: set = set()
+    stack = list(svc_list or [])
+    seen_groups: set = set()
+    while stack:
+        item = stack.pop()
+        if item in svc_groups:
+            if item in seen_groups:
+                continue
+            seen_groups.add(item)
+            stack.extend(svc_groups[item])
+        else:
+            out.add(item)
+    return list(out)
 
 def _int(val) -> int:
     try:
         return int(val or 0)
     except Exception:
         return 0
+
+def _parse_hit(val):
+    """hit count -> int 또는 None(미상). 천단위 콤마 허용, 쓰레기는 미상.
+
+    nan/inf/"1e400"도 미상이다 — int() 변환이 ValueError/OverflowError를
+    던지면 판정 전체가 죽는다(재비판 NEW-BUG).
+    """
+    if val is None:
+        return None
+    try:
+        if isinstance(val, (int, float)):
+            return int(val)
+        t = str(val).strip().replace(",", "")
+        if t in ("", "-", "N/A", "n/a"):
+            return None
+        return int(float(t))
+    except (ValueError, TypeError, OverflowError):
+        return None
 
 def _age(reg_date, today: date):
     if not reg_date:

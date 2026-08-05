@@ -264,7 +264,11 @@ def build_service_map(parsed: dict):
 def _policy_service_tuples(names: list[str], svc_map: dict):
     acc = []
     for n in names or []:
-        if str(n).upper() == "ALL":
+        # "ALL"은 config에 정의가 있으면 그 정의를 쓴다. 정의 조회 전에
+        # 우주집합으로 단정하면, ALL을 좁게 재정의한 환경에서 오탐 shadow가
+        # 생겨 "오탐 0" 보장이 깨진다(감사 B1). 미정의 ALL만 FortiGate
+        # 기본(전 프로토콜)으로 본다.
+        if n not in svc_map and str(n).upper() == "ALL":
             return UNIVERSE
         r = svc_map.get(n)
         if r is None:
@@ -325,10 +329,14 @@ def _policy_space(p: dict, addr_map: dict, svc_map: dict):
         return None, why
     src = _policy_addr_intervals(p.get("srcaddr"), addr_map)
     if src is None:
-        return None, "source address cannot be reduced to IP ranges (FQDN/geo/dynamic or undefined object)"
+        return None, ("source address cannot be reduced to IP ranges "
+                      "(FQDN/geography/dynamic, a VIP, or an object type this "
+                      "analysis does not resolve)")
     dst = _policy_addr_intervals(p.get("dstaddr"), addr_map)
     if dst is None:
-        return None, "destination address cannot be reduced to IP ranges (FQDN/geo/dynamic or undefined object)"
+        return None, ("destination address cannot be reduced to IP ranges "
+                      "(FQDN/geography/dynamic, a VIP, or an object type this "
+                      "analysis does not resolve)")
     svc = _policy_service_tuples(p.get("service"), svc_map)
     if svc is None:
         return None, "service cannot be reduced to protocol/port sets (undefined or unsupported object)"
