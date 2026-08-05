@@ -210,11 +210,66 @@ def build_severity_workbook(result: dict) -> bytes:
         ws.freeze_panes = "A2"
 
     _add_notes_sheet(wb, result)
+    _add_unreachable_sheet(wb, result)
 
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+def _add_unreachable_sheet(wb: Workbook, result: dict) -> None:
+    """정적 도달불가 검출 결과 시트.
+
+    결과에 reachability 데이터가 있을 때만 만든다 — 구형 클라이언트/골든
+    픽스처처럼 이 축이 없는 입력에서는 산출물이 변하지 않아야 한다.
+    """
+    reach = result.get("reachability") or {}
+    unreachable = reach.get("unreachable") or []
+    skipped = reach.get("skipped") or []
+    if not unreachable and not skipped:
+        return
+
+    ws = wb.create_sheet("Unreachable")
+    headers = ["Policy ID", "Policy Name", "Shadowed By (ID)",
+               "Shadowed By Name", "Shadower Action", "Detail"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+    r = 2
+    for u in unreachable:
+        for col, key in enumerate(("policy_id", "name", "shadowed_by",
+                                   "shadowed_by_name", "shadowed_by_action",
+                                   "detail"), 1):
+            write_text_cell(ws, r, col, str(u.get(key, "")))
+        r += 1
+
+    r += 1
+    write_text_cell(ws, r, 1, "Coverage")
+    ws.cell(row=r, column=1).font = Font(bold=True)
+    r += 1
+    write_text_cell(
+        ws, r, 1,
+        f"Assessed {reach.get('checked', 0)} of {reach.get('total_enabled', 0)} "
+        f"enabled policies. {len(skipped)} skipped (listed below).")
+    r += 1
+    write_text_cell(ws, r, 1, str(reach.get("note", "")))
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+    r += 2
+
+    if skipped:
+        write_text_cell(ws, r, 1, "Skipped policies (cannot be proven either way)")
+        ws.cell(row=r, column=1).font = Font(bold=True)
+        r += 1
+        for s in skipped:
+            write_text_cell(ws, r, 1, str(s.get("policy_id", "")))
+            write_text_cell(ws, r, 2, str(s.get("name", "")))
+            write_text_cell(ws, r, 3, str(s.get("reason", "")))
+            r += 1
+
+    for col, width in (("A", 12), ("B", 34), ("C", 16), ("D", 34), ("E", 14), ("F", 70)):
+        ws.column_dimensions[col].width = width
 
 
 def _add_notes_sheet(wb: Workbook, result: dict) -> None:

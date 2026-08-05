@@ -178,7 +178,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v71-2026-08-04"
+APO_VERSION = "v72-2026-08-04"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -520,6 +520,7 @@ def create_app() -> Flask:
             return result
 
         from app.services.policy_renderer import build_view_model
+        from app.services.reachability import detect_unreachable
         runtime_stats = app.config.get('last_runtime_stats', {})
         view = build_view_model(parsed, runtime_stats)
         return jsonify({
@@ -527,6 +528,8 @@ def create_app() -> Flask:
             "proxy":    classify_list(view.get("firewall_proxy_policy", [])),
             # 이번 분석에서 적용되지 않은 판정 규칙. export 시 Notes 시트로 실린다.
             "inactive_rules": describe_inactive_rules(app.config['profile']),
+            # 정적 도달불가 검출. severity와 별개 축 — 등급을 바꾸지 않는다.
+            "reachability": detect_unreachable(parsed),
         })
 
     # ── AI 분석 (Ollama/hermes3 로컬) ──────────────────────────────────────

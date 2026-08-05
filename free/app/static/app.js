@@ -1069,6 +1069,40 @@ document.addEventListener('click', e => {
     return out;
   }
 
+  function renderReachability(reach) {
+    const card = document.getElementById('sevReachCard');
+    const content = document.getElementById('sevReachContent');
+    const coverage = document.getElementById('sevReachCoverage');
+    if (!card || !content) return;
+    const unreachable = (reach && reach.unreachable) || [];
+    const skipped = (reach && reach.skipped) || [];
+    if (!reach || (!unreachable.length && !skipped.length)) { card.style.display='none'; return; }
+    card.style.display='';
+    if (coverage) coverage.textContent =
+      `${unreachable.length} unreachable · assessed ${reach.checked}/${reach.total_enabled} enabled policies · ${skipped.length} skipped`;
+    let html = '';
+    if (unreachable.length) {
+      html += `<table class="result-table"><thead><tr>
+        <th>Policy ID</th><th>Name</th><th>Shadowed By</th><th>Shadower Name</th><th>Shadower Action</th>
+      </tr></thead><tbody>` + unreachable.map(u => `<tr>
+        <td>${escapeHtml(String(u.policy_id??''))}</td>
+        <td>${escapeHtml(u.name||'')}</td>
+        <td>${escapeHtml(String(u.shadowed_by??''))}</td>
+        <td>${escapeHtml(u.shadowed_by_name||'')}</td>
+        <td>${escapeHtml(u.shadowed_by_action||'')}</td>
+      </tr>`).join('') + '</tbody></table>';
+    } else {
+      html += '<div class="empty-state"><strong>No unreachable policies found</strong><span>Among the policies that could be assessed, none is fully shadowed by a single policy above it.</span></div>';
+    }
+    if (skipped.length) {
+      html += `<details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Skipped policies (${skipped.length}) — cannot be proven either way</summary>
+        <table class="result-table" style="margin-top:8px"><thead><tr><th>Policy ID</th><th>Name</th><th>Reason</th></tr></thead><tbody>` +
+        skipped.map(s => `<tr><td>${escapeHtml(String(s.policy_id??''))}</td><td>${escapeHtml(s.name||'')}</td><td>${escapeHtml(s.reason||'')}</td></tr>`).join('') +
+        '</tbody></table></details>';
+    }
+    content.innerHTML = html;
+  }
+
   async function runClassify() {
     if (statusEl) statusEl.textContent='Classifying...';
     try {
@@ -1086,7 +1120,7 @@ document.addEventListener('click', e => {
       if (!res.ok) throw new Error(data.error||'Classification failed');
       sevData=data;
       window.__sevHasData = true;   // CSV 임포트 후 자동 재분류 트리거용(스코프 밖 접근)
-      renderSummaryBar(data); renderTable();
+      renderSummaryBar(data); renderTable(); renderReachability(data.reachability);
       const total=(data.firewall||[]).length+(data.proxy||[]).length;
       if (statusEl) statusEl.textContent=`Classification complete — ${total} policies processed.`;
     } catch(err) {

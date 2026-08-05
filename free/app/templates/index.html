@@ -310,6 +310,15 @@
         <div id="sevSummaryBar" class="sev-summary-bar"></div>
       </article>
 
+      <article class="glass-card" id="sevReachCard" style="margin-bottom:20px;padding:20px;display:none">
+        <div class="section-heading">
+          <div><span class="section-index">Unreachable</span><h2>Unreachable Policy Detection</h2></div>
+          <span class="inline-status" id="sevReachCoverage"></span>
+        </div>
+        <p class="sev-guide-note" style="margin-top:0">A policy is listed here only when a single always-on policy above it <strong>provably matches every packet</strong> it could match (source, destination, service, and interfaces all contained) — so it never takes effect. Conservative static analysis: policies using FQDN / geography / ISDB / user objects or negation are skipped, not guessed. Routing and NAT are not considered.</p>
+        <div id="sevReachContent" class="sev-table-wrap"></div>
+      </article>
+
       <article class="glass-card" id="sevTableCard" style="padding:20px;display:none">
         <div class="sev-subtabs">
           <button class="sev-subtab-btn active" data-sev-tab="firewall">Firewall Policy</button>
