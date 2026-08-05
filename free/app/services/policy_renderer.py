@@ -4,14 +4,15 @@ import re
 from datetime import date
 from typing import Any
 
-from .customer_rules_loader import load_customer_rules
+from .profile_loader import load_profile, to_customer_rules
 
 
 def _compile_ticket_pattern() -> re.Pattern | None:
-    """고객사 ITSM 티켓 ID 패턴은 customer_rules.json의 ticket_id_pattern으로 설정한다.
+    """ITSM 티켓 ID 패턴은 프로파일 naming.ticket_id_pattern으로 설정한다
+    (구형 customer_rules.json의 ticket_id_pattern도 하위호환 병합).
     설정이 없으면 오탐(false positive) 방지를 위해 티켓 ID 추출 자체를 건너뛴다
     (has_ritm=False로만 처리, 잘못된 매칭 없음)."""
-    pattern = load_customer_rules().get("ticket_id_pattern")
+    pattern = to_customer_rules(load_profile()).get("ticket_id_pattern")
     if not pattern:
         return None
     try:

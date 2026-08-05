@@ -1018,6 +1018,57 @@ document.addEventListener('click', e => {
     </tr></thead><tbody>${rows}</tbody></table>`;
   }
 
+  // ── 판정 임계값 설정 패널 ─────────────────────────────────────────────
+  // 기본값은 활성 프로파일에서 온다. 사용자가 손대지 않으면 프로파일 값이
+  // 그대로 되돌아가므로 결과가 변하지 않는다.
+  const thToggle = document.getElementById('sevThresholdToggle');
+  const thPanel  = document.getElementById('sevThresholdPanel');
+  const thEls = {
+    dormancy_days:              document.getElementById('thDormancy'),
+    long_dormancy_days:         document.getElementById('thLongDormancy'),
+    ss_schedule_age_years:      document.getElementById('thSchedAge'),
+    registration_fallback_year: document.getElementById('thRegYear'),
+    use_absolute_hit_threshold: document.getElementById('thUseAbsHit'),
+    su_hit_multiplier:          document.getElementById('thSuMult'),
+    ss_hit_threshold:           document.getElementById('thSsHit'),
+  };
+  let thLoaded = false;
+
+  if (thToggle && thPanel) thToggle.addEventListener('click', () => {
+    const open = thPanel.style.display !== 'none';
+    thPanel.style.display = open ? 'none' : '';
+    thToggle.textContent = open ? 'Show' : 'Hide';
+  });
+
+  async function loadThresholdDefaults() {
+    try {
+      const res = await fetch('/api/profile');
+      if (!res.ok) return;
+      const p = await res.json();
+      const nameEl = document.getElementById('sevProfileName');
+      if (nameEl) nameEl.textContent = p.name || 'default';
+      const th = p.thresholds || {};
+      for (const [key, el] of Object.entries(thEls)) {
+        if (!el) continue;
+        if (el.type === 'checkbox') el.checked = !!th[key];
+        else el.value = (th[key] ?? '') === null ? '' : (th[key] ?? '');
+      }
+      thLoaded = true;
+    } catch (_) { /* 프로파일 API 실패 시 서버측 프로파일 값으로 동작 */ }
+  }
+  loadThresholdDefaults();
+
+  function collectThresholds() {
+    const out = {};
+    for (const [key, el] of Object.entries(thEls)) {
+      if (!el) continue;
+      if (el.type === 'checkbox') { out[key] = el.checked; continue; }
+      const v = el.value.trim();
+      out[key] = v === '' ? null : Number(v);
+    }
+    return out;
+  }
+
   async function runClassify() {
     if (statusEl) statusEl.textContent='Classifying...';
     try {
@@ -1025,7 +1076,12 @@ document.addEventListener('click', e => {
         method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({ranges:userRanges.map(r=>r.cidr)}),
       });
-      const res = await fetch('/api/severity/classify',{method:'POST'});
+      // 패널 기본값을 아직 못 읽었으면 임계값을 보내지 않는다 —
+      // 비어 있는 값이 프로파일 설정을 null로 덮어쓰는 것을 막는다.
+      const res = await fetch('/api/severity/classify',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(thLoaded ? {thresholds: collectThresholds()} : {}),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error||'Classification failed');
       sevData=data;

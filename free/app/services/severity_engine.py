@@ -1,20 +1,22 @@
 """
 APO Severity Engine
 ===================
-고객별 예외 조건은 실행 디렉토리(또는 exe 인접 경로)의 customer_rules.json 파일로 관리한다.
-파일이 없으면 중립 기본값(빈 리스트)으로 동작 — 기본 배포본은 이 파일 없이도 정상 동작한다.
-customer_rules_loader.py 참고.
+판정 규칙 중 조직마다 다른 부분은 프로파일(profiles/*.yaml)로 관리한다.
+구형 customer_rules.json이 실행 디렉토리(또는 exe 인접 경로)에 있으면
+하위호환으로 병합된다 — profile_loader.py 참고.
+파일이 하나도 없으면 중립 기본값으로 동작한다.
 """
 
 from datetime import date
 from .schedule_utils import is_expired_schedule, is_always_schedule, get_schedule_date
 from .ip_classifier import classify_traffic_type
-from .customer_rules_loader import load_customer_rules
+from .profile_loader import load_profile, to_customer_rules
 
 # ================================================================
-# CUSTOMER_RULES — customer_rules.json 에서 로드 (없으면 중립 기본값)
+# CUSTOMER_RULES — 활성 프로파일에서 파생 (구형 customer_rules.json 병합 포함).
+# context에 customer_rules를 넘기지 않는 호출부(구형·테스트)용 폴백이다.
 # ================================================================
-CUSTOMER_RULES = load_customer_rules()
+CUSTOMER_RULES = to_customer_rules(load_profile())
 # ================================================================
 
 RISKY_SERVICES  = {"FTP", "TELNET", "TFTP", "RLOGIN", "RSH"}
@@ -123,6 +125,20 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
     su_multiplier      = th.get("su_hit_multiplier", 100)
     ss_hit_threshold   = th.get("ss_hit_threshold", 50)
     reg_fallback_year  = th.get("registration_fallback_year", 2021)
+    # 미사용 판정 기간. 표준에 숫자 근거가 없으므로(docs/inventory.md §2.3)
+    # 조직이 프로파일·UI로 조정한다. 365로 나누는 이유: _within_yrs가
+    # days/365.25로 비교하므로 365.25로 나누면 기본값에서 경계일이 하루
+    # 어긋난다(365/365.25 < 1.0). 365.0으로 나눠야 기존 '1년'과 정확히 같다.
+    dormancy_days      = th.get("dormancy_days") or 365
+    long_dormancy_days = th.get("long_dormancy_days") or 730
+    ss_sched_age_years = th.get("ss_schedule_age_years") or 2
+    dorm_yrs = dormancy_days / 365.0
+    long_yrs = long_dormancy_days / 365.0
+    # 판정 근거 문구용 라벨. 기본값이면 기존 문구를 그대로 유지한다(회귀 픽스처).
+    dorm_lbl = "1yr" if dormancy_days == 365 else f"{dormancy_days}d"
+    long_lbl = "2yr" if long_dormancy_days == 730 else f"{long_dormancy_days}d"
+    mid_lbl  = "1~2yr" if (dormancy_days == 365 and long_dormancy_days == 730) \
+               else f"{dorm_lbl}~{long_lbl}"
 
     # 서비스 분류 목록. 프로파일에서 주면 그것을, 없으면 내장 기본값을 쓴다.
     svc_cfg = context.get("services") or {}
@@ -166,7 +182,7 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
 
     tags = _compute_tags(
         status, action, hit_count, hit_count_known, last_used, schedule_val,
-        name, ritm, expanded_svcs, today, all_temp_kw
+        name, ritm, expanded_svcs, today, all_temp_kw, dormancy_days, dorm_lbl
     )
 
     def done(sev, reason, recommended=None):
@@ -225,7 +241,7 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
         is_mixed = bool(non_risky)   # 위험 서비스 + 정상 서비스 혼합
 
         if is_mixed:
-            if hit_count_known and hit_count > 0 and _within_yrs(last_used, today, 1):
+            if hit_count_known and hit_count > 0 and _within_yrs(last_used, today, dorm_yrs):
                 # 혼합 + 활성 사용 → 위험 서비스 포트만 제거
                 return done(
                     3,
@@ -243,39 +259,39 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
             return done(6, "Src/Dst Any·All + AD/DNS service")
         if all_three_any:
             return done(1, "Src, Dst, Service all Any·All")
-        if hit_count_known and hit_count > 0 and _within_yrs(last_used, today, 1):
+        if hit_count_known and hit_count > 0 and _within_yrs(last_used, today, dorm_yrs):
             if traffic_type == "Server-User":
-                return done(3, "Src/Dst Any·All + active (within 1yr) + S-U")
+                return done(3, f"Src/Dst Any·All + active (within {dorm_lbl}) + S-U")
             if traffic_type == "Server-Server":
-                return done(4, "Src/Dst Any·All + active (within 1yr) + S-S")
-            return done(3, "Src/Dst Any·All + active (within 1yr)")
+                return done(4, f"Src/Dst Any·All + active (within {dorm_lbl}) + S-S")
+            return done(3, f"Src/Dst Any·All + active (within {dorm_lbl})")
         return done(1, "Src/Dst Any·All + unused or long inactive")
 
     if svc_any:   # 서비스만 ALL인 경우
         if is_ad_dns:
             return done(6, "Service ALL + AD/DNS")
-        if hit_count_known and hit_count > 0 and _within_yrs(last_used, today, 1):
+        if hit_count_known and hit_count > 0 and _within_yrs(last_used, today, dorm_yrs):
             if traffic_type == "Server-User":
-                return done(5, "Service ALL + active (within 1yr) + S-U")
+                return done(5, f"Service ALL + active (within {dorm_lbl}) + S-U")
             if traffic_type == "Server-Server":
-                return done(4, "Service ALL + active (within 1yr) + S-S")
-            return done(3, "Service ALL + active (within 1yr)")
+                return done(4, f"Service ALL + active (within {dorm_lbl}) + S-S")
+            return done(3, f"Service ALL + active (within {dorm_lbl})")
         return done(1, "Service ALL + unused or long inactive")
     if has_temp_kw and not has_ritm:
         if hit_count_known and hit_count > 0:
-            if last_used and not _within_yrs(last_used, today, 1):
-                # Last Used >= 1yr
-                if not _within_yrs(last_used, today, 2):
-                    # Last Used >= 2yr → 삭제 후보
-                    return done(2, "Temp+NoTicket, Hit>0, Last Used >= 2yr")
-                # 1yr <= Last Used < 2yr → DT 검토
+            if last_used and not _within_yrs(last_used, today, dorm_yrs):
+                # Last Used >= dormancy
+                if not _within_yrs(last_used, today, long_yrs):
+                    # Last Used >= long dormancy → 삭제 후보
+                    return done(2, f"Temp+NoTicket, Hit>0, Last Used >= {long_lbl}")
+                # dormancy <= Last Used < long dormancy → DT 검토
                 if traffic_type == "Server-User":
-                    return done(3, "Temp+NoTicket, Hit>0, Last Used 1~2yr, S-U")
-                return done(4, "Temp+NoTicket, Hit>0, Last Used 1~2yr, S-S")
-            # Last Used < 1yr 또는 미상 → ITS 요청
+                    return done(3, f"Temp+NoTicket, Hit>0, Last Used {mid_lbl}, S-U")
+                return done(4, f"Temp+NoTicket, Hit>0, Last Used {mid_lbl}, S-S")
+            # Last Used < dormancy 또는 미상 → ITS 요청
             if traffic_type == "Server-User":
-                return done(5, "Temp+NoTicket, Hit>0, Last Used within 1yr, S-U")
-            return done(6, "Temp+NoTicket, Hit>0, Last Used within 1yr, S-S")
+                return done(5, f"Temp+NoTicket, Hit>0, Last Used within {dorm_lbl}, S-U")
+            return done(6, f"Temp+NoTicket, Hit>0, Last Used within {dorm_lbl}, S-S")
         reason_sfx = "CSV Not Loaded" if not hit_count_known else "Hit=0 (Unused)"
         return done(1, f"Temp+NoTicket, {reason_sfx}")
 
@@ -296,10 +312,10 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
             else:
                 if sched_date:
                     sched_age = (today - sched_date).days / 365.25
-                    if sched_age > 2:
-                        return done(4, f"Hit=0, S-S, sched_age={_fmt(sched_age)}yr > 2 -> 4")
+                    if sched_age > ss_sched_age_years:
+                        return done(4, f"Hit=0, S-S, sched_age={_fmt(sched_age)}yr > {ss_sched_age_years} -> 4")
                     else:
-                        return done(6, f"Hit=0, S-S, sched_age={_fmt(sched_age)}yr <= 2 -> 6")
+                        return done(6, f"Hit=0, S-S, sched_age={_fmt(sched_age)}yr <= {ss_sched_age_years} -> 6")
                 else:
                     if age > 1:
                         return done(2, f"Hit=0, S-S, age={_fmt(age)}yr > 1")
@@ -318,10 +334,10 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
             if reg_year is not None:
                 threshold = (today.year - reg_year) * su_multiplier
                 if hit_count_known and (age is None or age > 1) and hit_count < threshold:
-                    # Last Used < 1yr → 최근 사용 중 → Severity 5 (ITS 요청)
-                    if _within_yrs(last_used, today, 1):
-                        return done(5, f"S-U, Low hit ({hit_count}<{threshold}) + Last Used within 1yr — ITS request")
-                    return done(3, f"S-U, Hit {hit_count} < {threshold} ({today.year}-{reg_year}x{su_multiplier}), Last Used > 1yr")
+                    # Last Used < dormancy → 최근 사용 중 → Severity 5 (ITS 요청)
+                    if _within_yrs(last_used, today, dorm_yrs):
+                        return done(5, f"S-U, Low hit ({hit_count}<{threshold}) + Last Used within {dorm_lbl} — ITS request")
+                    return done(3, f"S-U, Hit {hit_count} < {threshold} ({today.year}-{reg_year}x{su_multiplier}), Last Used > {dorm_lbl}")
 
         if traffic_type == "Server-Server" and ss_hit_threshold is not None:
             age     = _age(request_date, today)
@@ -360,14 +376,15 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
 
 
 def _compute_tags(status, action, hit_count, hit_count_known, last_used_dt,
-                  schedule_val, name, ritm, expanded_svcs, today, all_temp_kw) -> list:
+                  schedule_val, name, ritm, expanded_svcs, today, all_temp_kw,
+                  dormancy_days=365, dorm_lbl="1yr") -> list:
     tags = []
     if status in ("disabled", "disable"):
         tags.append("Disabled")
     if hit_count_known and hit_count == 0:
         tags.append("No HitCount")
-    if last_used_dt and (today - last_used_dt).days > 365:
-        tags.append("Last Used > 1yr")
+    if last_used_dt and (today - last_used_dt).days > dormancy_days:
+        tags.append(f"Last Used > {dorm_lbl}")
     if is_expired_schedule(schedule_val, today):
         tags.append("Expired Schedule")
     if not name:

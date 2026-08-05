@@ -179,6 +179,11 @@ def load_profile(name: str | None = None, search_roots: list[Path] | None = None
         for root in roots:
             legacy = root / _LEGACY_FILE
             if legacy.is_file():
+                # 구형 설정 파일이 있는 배포는 프로파일 도입 *이전* 동작을
+                # 기대한다(SKBA v62 등 기 납품본). 당시 엔진 내장 기본값이던
+                # 임계값을 복원하지 않으면, 이 프로파일을 런타임에 연결하는
+                # 순간 중립 기본값이 우선해 기존 고객의 판정 결과가 바뀐다.
+                profile = _deep_merge(profile, _legacy_compat())
                 try:
                     with legacy.open(encoding="utf-8") as f:
                         data = json.load(f)
@@ -189,6 +194,36 @@ def load_profile(name: str | None = None, search_roots: list[Path] | None = None
                 break
 
     return profile
+
+
+def _legacy_compat() -> dict:
+    """프로파일 도입 전(v62~v70) 엔진 내장 기본값. skba.yaml의 임계값과 동일."""
+    return {
+        "thresholds": {
+            "dormancy_days": 365,
+            "long_dormancy_days": 730,
+            "use_absolute_hit_threshold": True,
+            "su_hit_multiplier": 100,
+            "ss_hit_threshold": 50,
+            "ss_schedule_age_years": 2,
+            "registration_fallback_year": 2021,
+        },
+        "rules": {"icmp_only_is_keep": True},
+    }
+
+
+def engine_context(profile: dict) -> dict:
+    """severity_engine의 context에 넣을 프로파일 파생 항목.
+
+    서버·스크립트가 같은 변환을 반복 구현하다 어긋나는 것을 막는다.
+    호출부는 여기에 service_groups / user_ranges / today를 추가해 쓴다.
+    """
+    return {
+        "customer_rules": to_customer_rules(profile),
+        "thresholds": dict(profile.get("thresholds") or {}),
+        "services": dict(profile.get("services") or {}),
+        "rules": dict(profile.get("rules") or {}),
+    }
 
 
 def describe_inactive_rules(profile: dict) -> list[dict]:

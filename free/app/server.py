@@ -178,7 +178,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v69-2026-07-29"
+APO_VERSION = "v71-2026-08-04"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -258,6 +258,66 @@ def create_app() -> Flask:
     @app.context_processor
     def inject_year():
         return {'current_year': _dt.now().year}
+
+    # ── 판정 프로파일 ──────────────────────────────────────────────────────
+    # 시작 시 한 번 로드한다(APO_PROFILE 환경변수 또는 default + 구형
+    # customer_rules.json 병합). UI에서 넘어온 임계값 오버라이드는
+    # thresholds_override에 보관해 classify와 export가 같은 기준을 쓰게 한다.
+    from app.services.profile_loader import (
+        load_profile, engine_context, describe_inactive_rules,
+    )
+    app.config['profile'] = load_profile()
+    app.config['thresholds_override'] = {}
+
+    # UI가 조정할 수 있는 임계값. 이 밖의 키는 무시한다(임의 키 주입 방지).
+    _THRESHOLD_FIELDS = {
+        "dormancy_days":              ("int",  1, 3650),
+        "long_dormancy_days":         ("int",  1, 7300),
+        "use_absolute_hit_threshold": ("bool", None, None),
+        "su_hit_multiplier":          ("int",  1, 100000),
+        "ss_hit_threshold":           ("int",  1, 1000000),
+        "ss_schedule_age_years":      ("int",  1, 20),
+        "registration_fallback_year": ("int",  2000, 2100),
+    }
+
+    def _sanitize_thresholds(raw: dict) -> dict:
+        out = {}
+        for key, (kind, lo, hi) in _THRESHOLD_FIELDS.items():
+            if key not in raw:
+                continue
+            val = raw[key]
+            if val is None:
+                out[key] = None       # 명시적 null = 해당 판정 끔
+                continue
+            if kind == "bool":
+                out[key] = bool(val)
+                continue
+            try:
+                num = int(val)
+            except (TypeError, ValueError):
+                continue
+            if lo <= num <= hi:
+                out[key] = num
+        return out
+
+    def _engine_ctx() -> dict:
+        ctx = engine_context(app.config['profile'])
+        override = app.config.get('thresholds_override') or {}
+        if override:
+            ctx["thresholds"] = {**ctx["thresholds"], **override}
+        return ctx
+
+    @app.get("/api/profile")
+    def get_profile():
+        profile = app.config['profile']
+        merged = _engine_ctx()
+        return jsonify({
+            "name": (profile.get("meta") or {}).get("name", "default"),
+            "description": (profile.get("meta") or {}).get("description", ""),
+            "thresholds": merged["thresholds"],
+            "rules": merged["rules"],
+            "inactive_rules": describe_inactive_rules(profile),
+        })
 
     for d in (IMPORT_DIR, EXPORT_DIR, DATA_DIR):
         d.mkdir(parents=True, exist_ok=True)
@@ -435,6 +495,12 @@ def create_app() -> Flask:
 
     @app.post("/api/severity/classify")
     def severity_classify():
+        # 임계값 오버라이드는 config 로드 여부와 무관하게 먼저 반영한다 —
+        # 사용자가 설정을 조정해 두고 나중에 config를 올리는 순서도 유효하다.
+        payload = request.get_json(silent=True) or {}
+        if "thresholds" in payload:
+            app.config['thresholds_override'] = _sanitize_thresholds(
+                payload.get("thresholds") or {})
         parsed = app.config.get('last_parsed')
         if not parsed:
             return jsonify({"error": "No config loaded. Upload a config file first."}), 400
@@ -444,6 +510,7 @@ def create_app() -> Flask:
             "service_groups": service_groups,
             "user_ranges": user_ranges,
             "today": _date.today(),
+            **_engine_ctx(),
         }
         def classify_list(policies):
             result = []
@@ -458,6 +525,8 @@ def create_app() -> Flask:
         return jsonify({
             "firewall": classify_list(view.get("firewall_policy", [])),
             "proxy":    classify_list(view.get("firewall_proxy_policy", [])),
+            # 이번 분석에서 적용되지 않은 판정 규칙. export 시 Notes 시트로 실린다.
+            "inactive_rules": describe_inactive_rules(app.config['profile']),
         })
 
     # ── AI 분석 (Ollama/hermes3 로컬) ──────────────────────────────────────
@@ -565,6 +634,7 @@ def create_app() -> Flask:
             "service_groups": service_groups,
             "user_ranges": user_ranges,
             "today": _date.today(),
+            **_engine_ctx(),
         }
         runtime_stats = app.config.get('last_runtime_stats', {})
         view = build_view_model(parsed, runtime_stats)

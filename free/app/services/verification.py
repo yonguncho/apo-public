@@ -32,6 +32,9 @@ WORKSHEET_COLUMNS = [
     ("name",          "정책 이름"),
     ("urgency",       "APO 등급"),
     ("risk_level",    "위험도"),
+    # 등급과 조치는 다른 축이다(Phase 3). 검증자가 "등급이 맞나"와
+    # "조치가 맞나"를 따로 판단할 수 있어야 하므로 조치 유형도 낸다.
+    ("action_label",  "조치 유형"),
     ("reason",        "APO 판정 근거"),
     ("recommended",   "권고 조치"),
     ("check_items",   "확인할 것"),
@@ -214,6 +217,7 @@ def build_rows(samples: Iterable[dict]) -> list[dict]:
             "name":        p.get("name"),
             "urgency":     p.get("urgency"),
             "risk_level":  p.get("risk_level"),
+            "action_label": p.get("action_label"),
             "reason":      p.get("reason"),
             "recommended": p.get("recommended_action"),
             "check_items": "\n".join(f"{i}. {c}" for i, c in enumerate(checks, 1)),
@@ -265,7 +269,7 @@ def to_xlsx(rows: list[dict]) -> bytes:
                 cell.fill = fill
 
     widths = {"policy_id": 10, "policy_type": 10, "name": 28, "urgency": 9,
-              "risk_level": 10, "reason": 40, "recommended": 30,
+              "risk_level": 10, "action_label": 20, "reason": 40, "recommended": 30,
               "check_items": 46, "cli_commands": 44, "actual": 30,
               "verdict": 16, "note": 24}
     for c_i, (key, _) in enumerate(WORKSHEET_COLUMNS, 1):

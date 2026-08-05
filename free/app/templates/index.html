@@ -195,22 +195,22 @@
                 <td><span class="sev-badge s7">7</span></td>
                 <td>None</td>
                 <td>Keep</td>
-                <td>① Action = Deny<br>② ICMP-only service (Ping, etc.)<br>③ Valid ITS ticket (ticket ID present + schedule not expired)<br>④ Policy name contains "controlled" (multi-firewall passthrough)<br>⑤ Policy matches a configured admin object</td>
-                <td>Exception policies — not subject to disable or deletion</td>
+                <td>① Action = Deny<br>② ICMP-only service (Ping, etc.)<br>③ Valid ITS ticket (ticket ID present + schedule not expired)<br>④ Policy name contains "controlled" (multi-firewall passthrough)<br>⑤ Policy matches a configured admin object <em>and carries no risky service</em></td>
+                <td>Two different meanings share this rating — see the <strong>Action</strong> column. <em>No risk</em> means assessed and found fine (deny, ICMP-only). <em>Not assessed (exempted)</em> means an exception rule stopped the assessment; it does not mean the policy is safe. An admin policy that still permits a risky service is rated 3, not 7</td>
               </tr>
               <tr class="sev-1">
                 <td><span class="sev-badge s1">1</span></td>
                 <td>Critical</td>
-                <td>Disable Immediately</td>
+                <td>Disable now</td>
                 <td>① Source, destination, <strong>and</strong> service are all Any/All<br>② Source or destination Any/All + Hit Count = 0<br>③ Source or destination Any/All + Hit Count &gt; 0 but Last Used ≥ 1 year<br>④ <strong>Risky service only</strong> (FTP, TELNET, TFTP, RLOGIN, RSH)<br>⑤ Risky + normal service <strong>mixed</strong> + Hit Count = 0 or Last Used ≥ 1 year<br>⑥ Temp keyword in name (temp, etc.) + No ITS Request + Hit Count = 0<br>⑦ Service ALL + Hit Count = 0 or Last Used ≥ 1 year</td>
-                <td>After disabling, delete once Hit Count confirms 0</td>
+                <td>Disable, then monitor 30–90 days before removing</td>
               </tr>
               <tr class="sev-2">
                 <td><span class="sev-badge s2">2</span></td>
                 <td>High</td>
-                <td>Delete Required</td>
+                <td>Review candidate</td>
                 <td>① Status = Disabled<br>② Schedule expired (YYMMDD date is in the past)<br>③ Hit=0 + Accept + Server↔User + registered ≥ 1 year ago<br>④ Hit=0 + Accept + Server - Server + always schedule + &gt; 1 year</td>
-                <td>Policies registered &lt; 1 year are excluded. S-S date schedules apply a 2-year threshold</td>
+                <td>Confirm with the policy owner before removing. Already-disabled and expired policies are removal candidates; live but unused policies should be disabled and observed first</td>
               </tr>
               <tr class="sev-3">
                 <td><span class="sev-badge s3">3</span></td>
@@ -243,6 +243,46 @@
             </tbody>
           </table>
           <p class="sev-guide-note">※ Without User IP ranges configured, traffic type (Server/User) cannot be determined — <strong>Severity 1, 2, and 7 can still be assessed without IP ranges</strong></p>
+        </div>
+      </article>
+
+      <article class="glass-card" style="margin-bottom:20px;padding:20px">
+        <div class="section-heading">
+          <div><span class="section-index">Settings</span><h2>Assessment Thresholds</h2></div>
+          <button type="button" id="sevThresholdToggle" class="secondary-btn">Show</button>
+        </div>
+        <div id="sevThresholdPanel" style="display:none">
+          <p class="sev-guide-note" style="margin-top:0">No public standard prescribes these numbers — they are <strong>your organization's audit criteria</strong>. Defaults come from the active profile (<span id="sevProfileName">default</span>). Changes apply the next time you click Classify.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 20px">
+            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Dormancy period (days)
+              <input type="number" id="thDormancy" class="sev-user-range-input" min="1" max="3650" />
+              <span style="font-size:11px;color:var(--muted)">A policy last used longer ago than this is treated as no longer in use</span>
+            </label>
+            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Long dormancy (days)
+              <input type="number" id="thLongDormancy" class="sev-user-range-input" min="1" max="7300" />
+              <span style="font-size:11px;color:var(--muted)">Beyond this, a temp policy becomes a removal candidate</span>
+            </label>
+            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Schedule age limit (years)
+              <input type="number" id="thSchedAge" class="sev-user-range-input" min="1" max="20" />
+              <span style="font-size:11px;color:var(--muted)">Unused Server-Server policies with a schedule older than this are escalated</span>
+            </label>
+            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Registration fallback year
+              <input type="number" id="thRegYear" class="sev-user-range-input" min="2000" max="2100" placeholder="empty = skip" />
+              <span style="font-size:11px;color:var(--muted)">Assumed registration year when a policy name carries no date. Leave empty to skip age-based checks for those policies</span>
+            </label>
+            <label class="inline-status" style="display:flex;flex-direction:column;gap:6px;justify-content:flex-start">
+              <span><input type="checkbox" id="thUseAbsHit" style="margin-right:6px" />Use absolute hit-count thresholds</span>
+              <span style="font-size:11px;color:var(--muted)">Off by default: hit counters reset on reboot/HA failover, so low counts are weak evidence</span>
+            </label>
+            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Server-User hit multiplier
+              <input type="number" id="thSuMult" class="sev-user-range-input" min="1" max="100000" placeholder="e.g. 100" />
+              <span style="font-size:11px;color:var(--muted)">Low usage if hits &lt; (years since registration) × this value</span>
+            </label>
+            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Server-Server hit threshold
+              <input type="number" id="thSsHit" class="sev-user-range-input" min="1" max="1000000" placeholder="e.g. 50" />
+              <span style="font-size:11px;color:var(--muted)">Low usage if hits fall below this value</span>
+            </label>
+          </div>
         </div>
       </article>
 
@@ -382,7 +422,7 @@
           <div class="rem-section-header">
             <span class="rem-section-label rem-label-critical">Step 1 — Disable (Critical)</span>
             <span id="remCriticalCount" class="rem-section-count" style="margin-left:8px"></span>
-            <span class="rem-section-desc" style="margin-left:8px">Disable immediately</span>
+            <span class="rem-section-desc" style="margin-left:8px">Disable, then monitor 30–90 days before removing</span>
           </div>
           <div class="rem-table-wrap">
             <table class="rem-table" id="remCriticalTable">
@@ -401,7 +441,7 @@
           <div class="rem-section-header">
             <span class="rem-section-label rem-label-high">Step 2 — Disable (High)</span>
             <span id="remHighCount" class="rem-section-count" style="margin-left:8px"></span>
-            <span class="rem-section-desc" style="margin-left:8px">Disable now — review for deletion separately</span>
+            <span class="rem-section-desc" style="margin-left:8px">Review candidate — confirm before removing</span>
           </div>
           <div class="rem-table-wrap">
             <table class="rem-table" id="remHighTable">
