@@ -209,13 +209,134 @@ def build_severity_workbook(result: dict) -> bytes:
             ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
         ws.freeze_panes = "A2"
 
+    for sheet_name, policies in sheet_map:
+        ws = wb[sheet_name]
+        if ws.max_row > 1:
+            ws.auto_filter.ref = ws.dimensions   # 감사자는 등급·조치로 걸러 본다
+
     _add_notes_sheet(wb, result)
+    _add_summary_sheet(wb, result)
     _add_unreachable_sheet(wb, result)
 
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+def _add_summary_sheet(wb: Workbook, result: dict) -> None:
+    """보고서 첫 장 — 문서 정보 · 판정 기준 · 결과 요약.
+
+    감사 보고서는 수치 나열 전에 세 가지를 스스로 증명해야 한다:
+    무엇을(설정 파일 식별: 파일명·SHA-256·장비·버전), 어떤 기준으로(프로파일·
+    임계값 — 이게 없으면 "왜 이 정책이 이 등급인가"에 답할 수 없다),
+    언제·무엇이 분석했나(생성 시각·도구 버전).
+
+    report_meta가 있을 때만 만든다 — 서버가 주입하는 데이터라서, 이 축이
+    없는 입력(회귀 픽스처·구형 클라이언트)에서는 산출물이 변하지 않는다.
+    """
+    rm = result.get("report_meta")
+    if not rm:
+        return
+
+    from app.services.severity_engine import ACTION_LABELS, SEVERITY_META
+
+    ws = wb.create_sheet("Summary", 0)
+    ws.sheet_view.showGridLines = False
+    title_font = Font(bold=True, size=14)
+    head_font = Font(bold=True, size=11)
+
+    def kv(r, key, val):
+        write_text_cell(ws, r, 1, key).font = Font(bold=True)
+        write_text_cell(ws, r, 2, "" if val is None else str(val))
+        return r + 1
+
+    r = 1
+    ws.cell(row=r, column=1, value="APO Policy Analysis Report").font = title_font
+    r += 2
+
+    ws.cell(row=r, column=1, value="Document").font = head_font
+    r += 1
+    r = kv(r, "Generated", rm.get("generated_at"))
+    r = kv(r, "Tool version", rm.get("apo_version"))
+    r = kv(r, "Device hostname", rm.get("hostname"))
+    r = kv(r, "Config version", rm.get("config_version"))
+    r = kv(r, "Config file", rm.get("config_filename"))
+    r = kv(r, "Config SHA-256", rm.get("config_sha256"))
+    r = kv(r, "Usage CSV loaded", "yes" if rm.get("csv_loaded") else
+           "no — hit-count / last-used based checks were limited")
+    r += 1
+
+    ws.cell(row=r, column=1, value="Assessment criteria").font = head_font
+    r += 1
+    r = kv(r, "Profile", rm.get("profile"))
+    r = kv(r, "User IP ranges configured", rm.get("user_range_count"))
+    th = rm.get("thresholds") or {}
+    _TH_LABELS = [
+        ("dormancy_days",              "Dormancy period (days)"),
+        ("long_dormancy_days",         "Long dormancy (days)"),
+        ("use_absolute_hit_threshold", "Absolute hit-count thresholds"),
+        ("su_hit_multiplier",          "Server-User hit multiplier"),
+        ("ss_hit_threshold",           "Server-Server hit threshold"),
+        ("ss_schedule_age_years",      "Schedule age limit (years)"),
+        ("registration_fallback_year", "Registration fallback year"),
+    ]
+    for key, label in _TH_LABELS:
+        val = th.get(key)
+        if isinstance(val, bool):
+            val = "on" if val else "off"
+        elif val is None:
+            val = "not used"
+        r = kv(r, label, val)
+    rules = rm.get("rules") or {}
+    r = kv(r, "ICMP-only policies kept",
+           "yes" if rules.get("icmp_only_is_keep") else "no")
+    r += 1
+
+    all_policies = result.get("firewall", []) + result.get("proxy", [])
+    ws.cell(row=r, column=1, value="Results").font = head_font
+    r += 1
+    r = kv(r, "Policies analyzed",
+           f"{len(all_policies)} (firewall {len(result.get('firewall', []))}, "
+           f"proxy {len(result.get('proxy', []))})")
+    reach = result.get("reachability") or {}
+    if reach:
+        r = kv(r, "Unreachable policies",
+               f"{len(reach.get('unreachable') or [])} "
+               f"(assessed {reach.get('checked', 0)}/{reach.get('total_enabled', 0)}, "
+               f"{len(reach.get('skipped') or [])} skipped — see Unreachable sheet)")
+    r += 1
+
+    write_text_cell(ws, r, 1, "Severity").font = Font(bold=True)
+    write_text_cell(ws, r, 2, "Risk Level").font = Font(bold=True)
+    write_text_cell(ws, r, 3, "Policies").font = Font(bold=True)
+    r += 1
+    from collections import Counter
+    sev_counts = Counter(p.get("urgency", 0) for p in all_policies)
+    for sev in sorted(sev_counts):
+        risk = SEVERITY_META.get(sev, ("Unknown",))[0]
+        c1 = write_text_cell(ws, r, 1, str(sev))
+        c1.fill = SEVERITY_FILLS.get(sev, SEVERITY_FILLS[0])
+        write_text_cell(ws, r, 2, risk)
+        write_text_cell(ws, r, 3, str(sev_counts[sev]))
+        r += 1
+    r += 1
+
+    write_text_cell(ws, r, 1, "Action").font = Font(bold=True)
+    write_text_cell(ws, r, 3, "Policies").font = Font(bold=True)
+    r += 1
+    act_counts = Counter(p.get("action_label") or "(none)" for p in all_policies)
+    # 조치 축은 작업 순서가 곧 우선순위다 — 라벨 정의 순서대로 나열한다.
+    ordered_labels = list(ACTION_LABELS.values())
+    for label in ordered_labels + sorted(set(act_counts) - set(ordered_labels)):
+        if act_counts.get(label):
+            write_text_cell(ws, r, 1, label)
+            write_text_cell(ws, r, 3, str(act_counts[label]))
+            r += 1
+
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 66
+    ws.column_dimensions["C"].width = 12
 
 
 def _add_unreachable_sheet(wb: Workbook, result: dict) -> None:

@@ -178,7 +178,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v72-2026-08-04"
+APO_VERSION = "v73-2026-08-04"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -355,6 +355,7 @@ def create_app() -> Flask:
         export_path.write_text(json.dumps({"parsed": parsed, "view": view}, indent=2), encoding="utf-8")
         app.config['last_parsed'] = parsed
         app.config['last_raw_config'] = raw      # Version Advisor 기능 감지용
+        app.config['last_config_filename'] = filename   # 리포트 문서정보용
         app.config['last_runtime_stats'] = {}   # 새 Config 로드 시 CSV stats 초기화
 
         return jsonify(
@@ -560,6 +561,28 @@ def create_app() -> Flask:
             return gate
         from app.services.workbook_exporter import build_severity_workbook
         payload = request.get_json(silent=True) or {}
+        # 문서 정보는 서버가 주입한다 — 감사 보고서는 "무엇을, 어떤 기준으로,
+        # 언제 분석했나"를 스스로 증명해야 하고, 그 사실은 클라이언트가 아니라
+        # 서버가 안다. config SHA-256이 있어야 "이 보고서는 그 설정 파일에
+        # 대한 것"이라는 대응이 성립한다.
+        import hashlib as _hashlib
+        raw_cfg = app.config.get('last_raw_config') or ''
+        meta = (app.config.get('last_parsed') or {}).get('meta', {})
+        merged_ctx = _engine_ctx()
+        payload["report_meta"] = {
+            "apo_version": APO_VERSION,
+            "generated_at": _dt.now().strftime("%Y-%m-%d %H:%M"),
+            "hostname": meta.get("hostname") or "",
+            "config_version": meta.get("config_version") or "",
+            "buildno": meta.get("buildno") or "",
+            "config_filename": app.config.get('last_config_filename') or "",
+            "config_sha256": _hashlib.sha256(raw_cfg.encode("utf-8", "ignore")).hexdigest() if raw_cfg else "",
+            "profile": (app.config['profile'].get("meta") or {}).get("name", "default"),
+            "thresholds": merged_ctx["thresholds"],
+            "rules": merged_ctx["rules"],
+            "user_range_count": len(app.config.get('user_ranges', [])),
+            "csv_loaded": bool(app.config.get('last_runtime_stats')),
+        }
         try:
             xlsx_bytes = build_severity_workbook(payload)
         except Exception as exc:
