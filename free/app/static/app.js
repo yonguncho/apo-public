@@ -1112,6 +1112,61 @@ document.addEventListener('click', e => {
     content.innerHTML = html;
   }
 
+  // ── 감사 증적 타임라인 (B-06) ─────────────────────────────────────
+  (() => {
+    const pick = document.getElementById('auditPickBtn');
+    const files = document.getElementById('auditFiles');
+    const names = document.getElementById('auditFileNames');
+    const run = document.getElementById('auditRunBtn');
+    const exp = document.getElementById('auditExportBtn');
+    const st = document.getElementById('auditStatus');
+    const out = document.getElementById('auditResult');
+    if (!run) return;
+    let hasTimeline = false;
+    if (pick) pick.addEventListener('click', () => files?.click());
+    if (files) files.addEventListener('change', () => {
+      const list = Array.from(files.files || []);
+      if (names) names.textContent = list.length
+        ? list.map(f => f.name).join(' → ') : 'No snapshots selected';
+    });
+    run.addEventListener('click', async () => {
+      const list = Array.from(files?.files || []);
+      if (list.length < 2) { if (st) st.textContent = 'Select at least two snapshots (oldest first).'; return; }
+      if (st) st.textContent = 'Building timeline...';
+      const fd = new FormData();
+      list.forEach(f => fd.append('snapshots', f));
+      try {
+        const res = await fetch('/api/audit/timeline', {method: 'POST', body: fd});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Timeline failed');
+        hasTimeline = true;
+        if (exp) exp.style.display = '';
+        if (st) st.textContent = `${data.snapshots.length} snapshots, ${data.intervals.length} interval(s).`;
+        if (out) out.innerHTML = `<table class="result-table"><thead><tr>
+          <th>#</th><th>From → To</th><th>+Pol</th><th>-Pol</th><th>Δ Pol</th><th>Objects</th><th>Changed IDs</th>
+        </tr></thead><tbody>` + data.intervals.map((iv, i) => {
+          const s2 = iv.summary || {};
+          return `<tr><td>${i + 1}</td>
+            <td>${escapeHtml(iv.from)} → ${escapeHtml(iv.to)}</td>
+            <td>${s2.added_policies}</td><td>${s2.removed_policies}</td><td>${s2.changed_policies}</td>
+            <td>+${s2.added_objects}/-${s2.removed_objects}</td>
+            <td style="font-size:11px;max-width:220px">${escapeHtml((s2.changed_ids || []).join(', '))}</td></tr>`;
+        }).join('') + '</tbody></table>';
+      } catch (err) { if (st) st.textContent = err.message || 'Failed'; }
+    });
+    if (exp) exp.addEventListener('click', async () => {
+      if (!hasTimeline) return;
+      if (!(await licenseGate())) return;
+      const res = await fetch('/api/audit/evidence-workbook', {method: 'POST'});
+      if (!res.ok) { await alertApiError(res, 'Evidence export failed.'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'apo_review_evidence.xlsx'; a.click();
+      URL.revokeObjectURL(url);
+    });
+  })();
+
   // ── 화이트라벨 브랜딩 (MSP 티어에만 노출) ─────────────────────────
   (async () => {
     try {

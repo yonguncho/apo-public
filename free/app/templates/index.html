@@ -173,6 +173,23 @@
           </div>
         </div>
       </article>
+
+      <article class="glass-card diff-card" style="margin-top:20px">
+        <div class="section-heading">
+          <div><span class="section-index">Audit Trail</span><h2>Ruleset Review Evidence</h2></div>
+          <span class="inline-status">PCI-DSS v4.0 Req 1.2.7 — review NSC configurations at least every six months</span>
+        </div>
+        <p class="sev-guide-note" style="margin-top:0">Upload two or more config snapshots (<strong>oldest first</strong> — FortiGate configs carry no backup timestamp, so the order you provide is the order recorded). APO builds a change timeline between snapshots and exports a <strong>Review Evidence</strong> workbook: each snapshot's SHA-256, changes per interval, the PCI-DSS citation, and a reviewer sign-off block. Collect snapshots with whatever you already use — Oxidized, FortiManager revisions, manual backups.</p>
+        <div class="sev-user-range-row" style="flex-wrap:wrap">
+          <button type="button" id="auditPickBtn" class="secondary-btn">Select snapshots (oldest first)</button>
+          <input type="file" id="auditFiles" accept=".conf,.txt" multiple hidden />
+          <span id="auditFileNames" class="inline-status">No snapshots selected</span>
+          <button type="button" id="auditRunBtn" class="primary-btn">Build timeline</button>
+          <button type="button" id="auditExportBtn" class="secondary-btn" style="display:none">Export Review Evidence (.xlsx)</button>
+        </div>
+        <div class="inline-status" id="auditStatus"></div>
+        <div id="auditResult" class="sev-table-wrap" style="margin-top:12px"></div>
+      </article>
     </section>
     <section id="severityView" class="page-view hidden">
       <div class="page-intro-card">
