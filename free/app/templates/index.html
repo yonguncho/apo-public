@@ -296,19 +296,19 @@
           </div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 20px">
             <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Dormancy period (days)
-              <input type="number" id="thDormancy" class="sev-user-range-input" min="1" max="3650" />
+              <input type="number" id="thDormancy" class="sev-user-range-input th-input" min="1" max="3650" />
               <span style="font-size:11px;color:var(--muted)">A policy last used longer ago than this is treated as no longer in use</span>
             </label>
             <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Long dormancy (days)
-              <input type="number" id="thLongDormancy" class="sev-user-range-input" min="1" max="7300" />
+              <input type="number" id="thLongDormancy" class="sev-user-range-input th-input" min="1" max="7300" />
               <span style="font-size:11px;color:var(--muted)">Beyond this, a temp policy becomes a removal candidate</span>
             </label>
             <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Schedule age limit (years)
-              <input type="number" id="thSchedAge" class="sev-user-range-input" min="1" max="20" />
+              <input type="number" id="thSchedAge" class="sev-user-range-input th-input" min="1" max="20" />
               <span style="font-size:11px;color:var(--muted)">Unused Server-Server policies with a schedule older than this are escalated</span>
             </label>
             <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Registration fallback year
-              <input type="number" id="thRegYear" class="sev-user-range-input" min="2000" max="2100" placeholder="empty = skip" />
+              <input type="number" id="thRegYear" class="sev-user-range-input th-input" min="2000" max="2100" placeholder="empty = skip" />
               <span style="font-size:11px;color:var(--muted)">Assumed registration year when a policy name carries no date. Leave empty to skip age-based checks for those policies</span>
             </label>
             <label class="inline-status" style="display:flex;flex-direction:column;gap:6px;justify-content:flex-start">
@@ -316,11 +316,11 @@
               <span style="font-size:11px;color:var(--muted)">Off by default: hit counters reset on reboot/HA failover, so low counts are weak evidence</span>
             </label>
             <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Server-User hit multiplier
-              <input type="number" id="thSuMult" class="sev-user-range-input" min="1" max="100000" placeholder="e.g. 100" />
+              <input type="number" id="thSuMult" class="sev-user-range-input th-input" min="1" max="100000" placeholder="e.g. 100" />
               <span style="font-size:11px;color:var(--muted)">Low usage if hits &lt; (years since registration) × this value</span>
             </label>
             <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Server-Server hit threshold
-              <input type="number" id="thSsHit" class="sev-user-range-input" min="1" max="1000000" placeholder="e.g. 50" />
+              <input type="number" id="thSsHit" class="sev-user-range-input th-input" min="1" max="1000000" placeholder="e.g. 50" />
               <span style="font-size:11px;color:var(--muted)">Low usage if hits fall below this value</span>
             </label>
           </div>

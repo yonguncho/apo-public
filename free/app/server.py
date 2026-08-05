@@ -183,7 +183,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v84-2026-08-05"
+APO_VERSION = "v85-2026-08-05"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -803,9 +803,27 @@ def create_app() -> Flask:
         text = uploaded.read().decode("utf-8", errors="ignore")
         mapping = parse_dnsproxy_dump(text)
         if not mapping:
-            return jsonify({"error": "No FQDN→IP entries recognized in the "
-                            "dump. Make sure it is the output of 'diagnose "
-                            "test application dnsproxy 6'."}), 400
+            # 왜 실패했는지 알 수 있게 진단을 함께 준다. "인식 못 했다"만
+            # 던지면 사용자가 파일이 잘못된 건지 도구가 못 읽는 건지 모른다.
+            lines = text.splitlines()
+            import re as _re
+            has_dom = any(_re.search(r'[A-Za-z0-9\-]+\.[A-Za-z]{2,}', ln)
+                          for ln in lines[:2000])
+            has_ip = any(_re.search(r'\d{1,3}(?:\.\d{1,3}){3}', ln)
+                         for ln in lines[:2000])
+            hint = ("The file has domains and IPs but not in a layout this "
+                    "parser recognizes — please send a few sample lines so "
+                    "it can be supported."
+                    if (has_dom and has_ip) else
+                    "The file does not appear to contain FQDN entries. Run "
+                    "'diagnose test application dnsproxy 6' (or 'diagnose "
+                    "firewall fqdn list') and save the full console output.")
+            return jsonify({
+                "error": f"No FQDN→IP entries recognized. {hint}",
+                "diagnostics": {"lines": len(lines),
+                                "domains_seen": has_dom,
+                                "ipv4_seen": has_ip},
+            }), 400
         app.config['fqdn_cache'] = {
             "map": mapping,
             "captured_at": _dt.now().strftime("%Y-%m-%d %H:%M"),
