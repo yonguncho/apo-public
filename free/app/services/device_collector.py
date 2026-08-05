@@ -82,6 +82,14 @@ def _policy_stats_from_monitor(payload) -> dict:
     return out
 
 
+def _looks_valid_ipv4(text: str) -> bool:
+    try:
+        ip = ipaddress.IPv4Address(text)
+    except ipaddress.AddressValueError:
+        return False
+    return not (ip.is_unspecified or ip.is_loopback or ip.is_multicast)
+
+
 def _fqdn_map_from_monitor(payload) -> dict:
     """monitor/firewall/address-fqdns 응답 -> {fqdn(소문자): [ip,...]}."""
     out: dict = {}
@@ -95,13 +103,22 @@ def _fqdn_map_from_monitor(payload) -> dict:
         if not name:
             continue
         addrs = row.get("addrs") or row.get("addresses") or row.get("ipv4") or []
-        if isinstance(addrs, str):
+        if isinstance(addrs, (str, bytes)):
             addrs = [addrs]
+        elif isinstance(addrs, dict):
+            addrs = list(addrs.values())
+        elif not isinstance(addrs, (list, tuple, set)):
+            continue        # 숫자 등 비-이터러블 → 이 항목 건너뜀(500 방지)
         ips = []
         for a in addrs:
             if isinstance(a, dict):
-                a = a.get("ip") or a.get("addr") or a.get("ipv4")
-            a = str(a or "").strip()
+                # or 체인으로 첫 키만 보면 "ip":"0.0.0.0" 때문에 유효한
+                # 형제 값을 버린다. 후보를 전부 시도한다(재비판 PASS 잔여점).
+                cands = [a.get(k) for k in ("ip", "addr", "ipv4")]
+            else:
+                cands = [a]
+            a = next((str(x).strip() for x in cands
+                      if x is not None and _looks_valid_ipv4(str(x).strip())), "")
             # 반드시 유효 IPv4여야 한다. 검증 없이 담으면 필드 변형 시
             # 'x'·'123456' 같은 잡값이 판정 입력으로 들어간다(재비판).
             try:
@@ -137,7 +154,11 @@ def collect_from_device(device: dict) -> dict:
         raise ValueError(
             f"Config backup failed (HTTP {r.status_code}). The token needs "
             "read access to system configuration.")
-    if len(r.content) > _MAX_CONFIG_BYTES:
+    # 크기는 content(바이트)를 우선 보되 없는 응답 객체(커스텀 어댑터·모킹)
+    # 에서도 죽지 않게 text로 폴백한다(재비판 SUSPECT).
+    body = getattr(r, "content", None)
+    size = len(body) if body is not None else len(r.text.encode("utf-8", "ignore"))
+    if size > _MAX_CONFIG_BYTES:
         raise ValueError("Configuration backup exceeds the 50 MB limit.")
     config_text = r.text
 

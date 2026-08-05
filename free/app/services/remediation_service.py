@@ -29,6 +29,27 @@ _HOSTNAME_RE = re.compile(
 )
 
 
+def _is_link_local(parsed) -> bool:
+    """링크로컬인가 — IPv6 래핑 우회까지 본다.
+
+    ipaddress는 '::ffff:169.254.169.254'.is_link_local을 False로 준다.
+    169.254.169.254는 클라우드 메타데이터 SSRF의 표준 표적이므로, IPv4-mapped·
+    6to4·Teredo로 감싼 형태도 같은 주소로 취급해 막는다(재비판 NEW-BUG).
+    """
+    if parsed.is_link_local:
+        return True
+    if parsed.version != 6:
+        return False
+    for attr in ("ipv4_mapped", "sixtofour", "teredo"):
+        val = getattr(parsed, attr, None)
+        if val is None:
+            continue
+        for cand in (val if isinstance(val, tuple) else (val,)):
+            if cand is not None and cand.is_link_local:
+                return True
+    return False
+
+
 def validate_device_address(ip: str) -> str:
     """장비 주소를 검증해 URL에 넣어도 안전한 형태로 반환한다.
 
@@ -38,21 +59,18 @@ def validate_device_address(ip: str) -> str:
     if not addr:
         raise ValueError("Device address is required")
 
+    parsed = None
     try:
         parsed = ipaddress.ip_address(addr.strip("[]"))
-        # 링크로컬만 막는다. 169.254.169.254는 클라우드 메타데이터 SSRF의
-        # 표준 표적인데, 방화벽을 링크로컬로 관리하는 경우는 없다.
-        # 사설대역(10./192.168.)과 루프백은 **허용해야 한다** — 방화벽은
-        # 대개 사설망에 있고, SSH 터널(-L 8443:fw:443) 경유가 실제 운용
-        # 방식이라 이걸 막으면 정상 사용자가 못 쓴다(재비판 SUSPECT 대응).
-        if parsed.is_link_local:
+    except ValueError:
+        parsed = None
+
+    if parsed is not None:
+        if _is_link_local(parsed):
             raise ValueError("Link-local addresses are not allowed as a "
                              "device address")
         return f"[{parsed}]" if parsed.version == 6 else str(parsed)
-    except ValueError as exc:
-        if "Link-local" in str(exc):
-            raise
-        pass
+
 
     if not _HOSTNAME_RE.match(addr):
         raise ValueError("Device address must be an IP address or hostname")
