@@ -40,6 +40,7 @@ _LEGACY_KEY_MAP = {
     "extra_temp_keywords":  ("naming", "extra_temp_keywords"),
     "temp_keywords":        ("naming", "temp_keywords"),
     "ticket_id_pattern":    ("naming", "ticket_id_pattern"),
+    "controlled_keywords":  ("naming", "controlled_keywords"),
 }
 
 
@@ -94,7 +95,8 @@ def builtin_defaults() -> dict:
             "temp_keywords": ["Temp", "temp", "test", "테스트", "작업", "임시",
                               "migration", "backup", "old"],
             "extra_temp_keywords": [],
-            "controlled_keywords": ["controlled"],
+            # 조직 고유 관례. 기본은 없음 — 범용 규칙이 아니다.
+            "controlled_keywords": [],
         },
     }
 
@@ -209,6 +211,7 @@ def _legacy_compat() -> dict:
             "registration_fallback_year": 2021,
         },
         "rules": {"icmp_only_is_keep": True},
+        "naming": {"controlled_keywords": ["controlled"]},
     }
 
 
@@ -302,4 +305,5 @@ def to_customer_rules(profile: dict) -> dict:
         "temp_keywords":        list(nam.get("temp_keywords") or []),
         "extra_temp_keywords":  list(nam.get("extra_temp_keywords") or []),
         "ticket_id_pattern":    nam.get("ticket_id_pattern"),
+        "controlled_keywords":  list(nam.get("controlled_keywords") or []),
     }

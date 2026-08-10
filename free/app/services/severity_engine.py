@@ -47,17 +47,19 @@ ACTION_SERVICE_REMOVE = "SERVICE_REMOVE"   # 특정 서비스만 제거 (정책�
 ACTION_REVIEW         = "REVIEW"           # 추가 검토 필요
 ACTION_TICKET         = "TICKET"           # 등록 요청
 ACTION_NO_RISK        = "NO_RISK"          # 위험 아님
+ACTION_APPROVED       = "APPROVED"         # 승인 확인됨 (유효 티켓)
 ACTION_EXCLUDED       = "EXCLUDED"         # 예외로 판정하지 않음
 ACTION_UNKNOWN        = "UNKNOWN"          # 판정 불가
 
 ACTION_LABELS = {
     ACTION_DISABLE:        "Disable now",
-    ACTION_REVIEW_REMOVE:  "Review candidate",
+    ACTION_REVIEW_REMOVE:  "Remove (already inert)",
     ACTION_DISABLE_FIRST:  "Disable & monitor",
     ACTION_SERVICE_REMOVE: "Remove service only",
     ACTION_REVIEW:         "Needs review",
     ACTION_TICKET:         "Register ticket",
     ACTION_NO_RISK:        "No risk",
+    ACTION_APPROVED:       "Approved (ticket verified)",
     ACTION_EXCLUDED:       "Not assessed (exempted)",
     ACTION_UNKNOWN:        "Cannot assess",
 }
@@ -93,6 +95,10 @@ def derive_action(urgency: int, reason: str, recommended_action: str = "") -> st
         # 같은 7이라도 '봐도 문제없음'과 '예외라 안 봄'은 다르다.
         if r.startswith("action = deny") or "icmp only" in r:
             return ACTION_NO_RISK
+        # 유효 티켓은 '검사를 안 한 것'이 아니라 '승인을 확인한 것'이다.
+        # Not assessed로 표기하면 점검 누락처럼 읽힌다(실장비 대조 지적).
+        if r.startswith("valid its"):
+            return ACTION_APPROVED
         return ACTION_EXCLUDED
     if urgency == 1:
         return ACTION_DISABLE
@@ -165,6 +171,8 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
     ritm         = policy.get("ritm")
     has_ritm     = bool(ritm)
 
+    src_names = policy.get("srcaddr_names") or []
+    dst_names = policy.get("dstaddr_names") or []
     src_list = policy.get("srcaddr_display") or []
     dst_list = policy.get("dstaddr_display") or []
     svc_list = policy.get("service_display") or []
@@ -179,9 +187,17 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
     is_expired     = is_expired_schedule(schedule_val, today)
     is_always      = is_always_schedule(schedule_val)
     sched_date     = get_schedule_date(schedule_val)
+    # 'controlled' 는 SKON 고객의 다중 방화벽 운영 관례다(출발지 인접
+    # 방화벽에서 세부 정책을 정의하고 하위 방화벽은 범위를 넓혀 등록).
+    # 범용 규칙이 아니므로 프로파일에서 온다 — 기본은 비어 있다(실장비
+    # 대조에서 "범용적으로 이렇게 사용하지 않는다"로 확인, 2026-08-06).
+    controlled_kw  = customer_rules.get("controlled_keywords", CONTROLLED_KW)
     all_temp_kw    = customer_rules.get("temp_keywords", []) + customer_rules.get("extra_temp_keywords", [])
     has_temp_kw    = any(_kw_in_name(name, kw) for kw in all_temp_kw)
-    has_controlled = any(kw.lower() in name.lower() for kw in CONTROLLED_KW)
+    # 부분 문자열 매칭 — temp 키워드와 달리 경계를 요구하면 안 된다.
+    # 실제 정책명이 "ControlledbySourceFW"처럼 붙여 쓴 형태라 경계가 없다.
+    # 'controlled'는 길고 특징적인 단어라 오탐 위험도 낮다.
+    has_controlled = any(kw.lower() in name.lower() for kw in controlled_kw)
 
     tags = _compute_tags(
         status, action, hit_count, hit_count_known, last_used, schedule_val,
@@ -203,16 +219,21 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
         return done(7, f"Action = Deny ('{action}')")
     # Disabled 정책은 예외 규칙들보다 우선 → 항상 2 (Deny만 그보다 먼저 7)
     if status in ("disabled", "disable"):
-        return done(2, "Status = Disabled")
+        # 사실 기반 판정 — 설정상 이미 무효라 "확인 후 삭제"할 게 없다.
+        # 추론(미사용 추정)과 같은 문구를 쓰면 확실한 것이 불확실해 보인다
+        # (2026-08-10 실장비 대조: 등급 2 전건이 이 문구를 지적).
+        return done(2, "Status = Disabled",
+                    recommended="Remove — disabled in the configuration, "
+                                "so no traffic can match it")
     # 판정 순서 원칙(감사 A6·A7 + 재비판): 사실(deny·disabled)이 먼저,
     # 그다음 고객의 명시 지정(override), 그다음 '항상 Critical' 고위험 객체,
     # ICMP 예외 같은 일반 면제 규칙은 그 뒤다. 명시 지정이 일반 면제에
     # 지면 설정한 사람 입장에서 오버라이드가 소리 없이 무시된다.
     for obj, sev in customer_rules.get("severity_overrides", {}).items():
-        if _in_obj(obj, name, src_list, dst_list):
+        if _in_obj(obj, name, src_list, dst_list, src_names, dst_names):
             return done(sev, f"Override: {obj} -> {sev}")
     for obj in customer_rules.get("high_risk_objects", []):
-        if _in_obj(obj, name, src_list, dst_list):
+        if _in_obj(obj, name, src_list, dst_list, src_names, dst_names):
             return done(1, f"High-risk object: {obj}")
     # ICMP 전용 정책을 판정 대상에서 뺄지는 방화벽 위치에 달렸다.
     # NIST SP 800-41 r1 §4.1.4는 ICMP 전면 차단이 진단·성능 문제를 일으킨다고
@@ -231,7 +252,7 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
     # 검토 대상에서 통째로 사라진다(실 SKBA config에서 6건 확인).
     # 정책 삭제·비활성(1·2)보다 우선순위가 낮은 3으로 분류한다.
     for obj in customer_rules.get("admin_objects", []):
-        if _in_obj(obj, name, src_list, dst_list):
+        if _in_obj(obj, name, src_list, dst_list, src_names, dst_names):
             if is_risky:
                 found = sorted(set(expanded_svcs) & risky_services)
                 return done(
@@ -328,7 +349,9 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
         return done(3, "Temp+NoTicket, usage unknown (no usage data) — review")
 
     if is_expired:
-        return done(2, f"Schedule expired: {schedule_val}")
+        return done(2, f"Schedule expired: {schedule_val}",
+                    recommended=f"Remove — the schedule ended ({schedule_val}), "
+                                "so no traffic can match it")
 
     if hit_count_known and hit_count == 0 and action == "accept":
         age = _age(request_date, today)
@@ -381,7 +404,7 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
                 return done(4, f"S-S, age={_fmt(eff_age)}yr, Hit {hit_count} < {ss_hit_threshold}")
 
     for obj in customer_rules.get("user_segment_objects", []):
-        if _in_obj(obj, name, src_list, dst_list):
+        if _in_obj(obj, name, src_list, dst_list, src_names, dst_names):
             return done(5, f"User-segment object: {obj}")
     if traffic_type == "Server-User":
         age = _age(request_date, today)
@@ -393,10 +416,10 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
     if is_ad_dns and hit_count_known and hit_count > 0:
         return done(6, "AD_AUTH or DNS, Hit > 0")
     for obj in customer_rules.get("infra_objects", []):
-        if _in_obj(obj, name, src_list, dst_list):
+        if _in_obj(obj, name, src_list, dst_list, src_names, dst_names):
             return done(6, f"Infra object: {obj}")
     for obj in customer_rules.get("mgmt_objects", []):
-        if _in_obj(obj, name, src_list, dst_list):
+        if _in_obj(obj, name, src_list, dst_list, src_names, dst_names):
             return done(6, f"Mgmt-segment object: {obj}")
     if traffic_type == "Server-Server":
         age = _age(request_date, today)
@@ -464,9 +487,25 @@ def _is_any(val) -> bool:
     items = val if isinstance(val, list) else [val]
     return any(str(v).lower().strip() in ("all", "any", "", "0.0.0.0/0") for v in items)
 
-def _in_obj(obj: str, name: str, src, dst) -> bool:
-    targets = [name] + (src or []) + (dst or [])
-    return any(obj.lower() in str(t).lower() for t in targets)
+def _in_obj(obj: str, name: str, src, dst, src_names=None, dst_names=None) -> bool:
+    """정책이 예외 객체에 해당하는가.
+
+    우선순위가 있다:
+      1) **주소 객체 이름**과의 부분 일치 — 고객이 예외 목록에 적는 것이
+         객체명이므로 이게 본 경로다. 그룹 객체도 여기서 걸린다.
+      2) 펼쳐진 주소값(display) — 예외 목록에 CIDR을 적은 경우.
+      3) 정책 이름 — 단어 경계를 요구한다. 부분 일치를 허용하면
+         "NW_ADMIN-07_..." 같은 이름만으로 무관한 정책이 통째로 예외가 된다
+         (2026-08-10 대조 정책 583). 명명 규칙은 약한 근거라 엄격히 본다.
+    """
+    needle = obj.lower()
+    for t in (src_names or []) + (dst_names or []):
+        if needle in str(t).lower():
+            return True
+    for t in (src or []) + (dst or []):
+        if needle in str(t).lower():
+            return True
+    return bool(name) and _kw_in_name(name, obj)
 
 def _expand(svc_list, svc_groups: dict) -> list:
     """서비스 목록 전개 — 중첩 그룹 재귀 (순환 안전).

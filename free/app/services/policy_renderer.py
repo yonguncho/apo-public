@@ -215,6 +215,12 @@ def _render_policy(
         "dstaddr_display": _dedupe(sum([
             _resolve_address_object(name, address_map, addrgrp_map) for name in item.get("dstaddr", [])
         ], [])),
+        # 원본 객체명. display는 그룹을 구성원 IP로 펼치면서 이름을 버리는데,
+        # 고객이 등록한 예외 객체 목록(admin/mgmt/infra…)은 **이름**으로
+        # 매칭한다. 이름을 잃으면 그룹 객체에 대한 예외가 통째로 무력화된다
+        # (2026-08-10 실장비 대조에서 발견 — 실 config 112건 누락).
+        "srcaddr_names": list(item.get("srcaddr", [])),
+        "dstaddr_names": list(item.get("dstaddr", [])),
         "service_display": item.get("service", []),
         "service_resolved_display": _dedupe(sum([
             _resolve_service_object(name, service_custom_map, service_group_map) for name in item.get("service", [])
@@ -257,6 +263,12 @@ def _render_multicast_policy(
         "dstaddr_display": _dedupe(sum([
             _resolve_address_object(name, address_map, addrgrp_map) for name in item.get("dstaddr", [])
         ], [])),
+        # 원본 객체명. display는 그룹을 구성원 IP로 펼치면서 이름을 버리는데,
+        # 고객이 등록한 예외 객체 목록(admin/mgmt/infra…)은 **이름**으로
+        # 매칭한다. 이름을 잃으면 그룹 객체에 대한 예외가 통째로 무력화된다
+        # (2026-08-10 실장비 대조에서 발견 — 실 config 112건 누락).
+        "srcaddr_names": list(item.get("srcaddr", [])),
+        "dstaddr_names": list(item.get("dstaddr", [])),
         "action": item.get("action", ""),
         "status": display_status,
         "schedule": raw_schedule,

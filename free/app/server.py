@@ -183,7 +183,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v86-2026-08-05"
+APO_VERSION = "v88-2026-08-10"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:

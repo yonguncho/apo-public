@@ -372,7 +372,7 @@ _ACTION_PLAN_ORDER = [
     ("Disable now",         _CLI_DISABLE),
     ("Remove service only", _CLI_REMOVE_SVC),
     ("Disable & monitor",   _CLI_DISABLE),
-    ("Review candidate",    None),
+    ("Remove (already inert)", None),
     ("Needs review",        None),
     ("Register ticket",     None),
 ]
@@ -570,12 +570,14 @@ def _add_notes_sheet(wb: Workbook, result: dict) -> None:
     r += 1
     for label, desc in (
         ("Disable now",            "Disable this policy now."),
-        ("Review candidate",       "Candidate for removal — confirm first. Already disabled or past its expiry date."),
+        ("Remove (already inert)", "Already disabled or past its expiry date — the configuration itself "
+                                   "prevents any traffic from matching, so removal is a cleanup step."),
         ("Disable & monitor",      "Disable first, watch for 30–90 days, then decide whether to remove."),
         ("Remove service only",    "Keep the policy; remove only the flagged service from it."),
         ("Needs review",           "Needs a closer look before deciding."),
         ("Register ticket",        "Keep the policy, but register it through your approval process."),
         ("No risk",                "Assessed and found not to be a risk (deny rules, ICMP-only, and similar)."),
+        ("Approved (ticket verified)", "An approval ticket is recorded in the policy name and its schedule is still valid."),
         ("Not assessed (exempted)", "An exception rule stopped this policy from being assessed. This does NOT mean it is safe."),
         ("Cannot assess",          "Not enough information to judge."),
     ):

@@ -22,6 +22,7 @@ from __future__ import annotations
 import csv
 import io
 import random
+import re as _re
 from collections import Counter, defaultdict
 from typing import Any, Iterable
 
@@ -155,7 +156,14 @@ def derive_checks(policy: dict) -> tuple[list[str], list[str]]:
 
     low = reason.lower()
 
-    if "disabled" in low:
+    def has(*words) -> bool:
+        """단어 경계 매칭. 부분문자열이면 "S-U fallback"의 'fallback'이
+        'all'로 잡혀 판정과 무관한 확인 항목이 붙는다(실장비 대조에서
+        불일치 3건의 원인이었다)."""
+        return any(_re.search(r"(?<![a-z])" + _re.escape(w) + r"(?![a-z])", low)
+                   for w in words)
+
+    if has("disabled"):
         add("정책이 실제로 비활성(status disable) 상태인가")
     if "schedule expired" in low or "sched_age" in low:
         add("스케줄 만료일이 실제로 지났는가. 이름만 날짜이고 always는 아닌가")
@@ -169,7 +177,7 @@ def derive_checks(policy: dict) -> tuple[list[str], list[str]]:
         add("해당 서비스만 빼도 업무에 지장이 없는가 (담당자 확인 필요)")
         cmds.append("show firewall service custom <서비스명>")
         cmds.append("show firewall service group <그룹명>")
-    if "any" in low or "all" in low:
+    if has("any", "all"):
         add("출발지/목적지/서비스가 실제로 all 인가. 이름만 'all'인 객체는 아닌가")
         cmds.append("show firewall address all")
     if "object" in low or "admin policy" in low:
@@ -180,7 +188,7 @@ def derive_checks(policy: dict) -> tuple[list[str], list[str]]:
     if "noticket" in low.replace(" ", "") or "no ticket" in low:
         add("이 정책이 정말 승인 없이 만들어졌는가. 티켓 번호가 이름에 없을 뿐 "
             "별도 승인 기록이 있는 경우가 흔하다 (ITSM 대조)")
-    if "temp" in low:
+    if has("temp", "temp+noticket"):
         add("이름의 '임시' 표기가 실제로 임시 정책이라는 뜻인가. 이름만 그렇고 "
             "상시 운영 중인 경우가 있다 (담당자 확인 필요)")
 
@@ -196,9 +204,9 @@ def derive_checks(policy: dict) -> tuple[list[str], list[str]]:
     if "s-u" in low or "s-s" in low or "server-user" in low or "server-server" in low:
         add("출발지/목적지가 실제로 사용자 대역/서버 대역이 맞는가")
         cmds.append("show firewall address <객체명>")
-    if "deny" in low:
+    if has("deny"):
         add("action이 실제로 deny 인가")
-    if "icmp" in low:
+    if has("icmp"):
         add("허용 서비스가 ICMP 계열뿐인가")
 
     if not checks:
@@ -286,6 +294,26 @@ def to_xlsx(rows: list[dict]) -> bytes:
 # 3) 정밀도 계산
 # ---------------------------------------------------------------------------
 
+def _normalize_verdict(raw) -> str:
+    """사람이 적은 판정 값을 정규화한다.
+
+    사람이 채우는 칸이라 표기가 제각각이다("판정 일치", "일치 O", "match").
+    IP 귀속과 달리 여기서 관대함은 안전하다 — 오독하면 수치가 틀릴 뿐
+    잘못된 판정을 만들지 않는다. 단 '불일치'는 '일치'를 포함하므로
+    반드시 먼저 검사한다.
+    """
+    v = str(raw or "").strip().lower().replace(" ", "")
+    if not v:
+        return ""
+    if VERDICT_MISMATCH in v or "mismatch" in v or v in ("x", "no", "n"):
+        return VERDICT_MISMATCH
+    if VERDICT_HOLD in v or "hold" in v or "pending" in v:
+        return VERDICT_HOLD
+    if VERDICT_MATCH in v or "match" in v or v in ("o", "ok", "yes", "y"):
+        return VERDICT_MATCH
+    return ""
+
+
 def compute_precision(rows: Iterable[dict]) -> dict:
     """사람이 채운 워크시트를 받아 등급별 정확도를 낸다.
 
@@ -294,7 +322,7 @@ def compute_precision(rows: Iterable[dict]) -> dict:
     """
     per_level: dict[Any, Counter] = defaultdict(Counter)
     for r in rows:
-        v = str(r.get("verdict") or "").strip()
+        v = _normalize_verdict(r.get("verdict"))
         level = r.get("urgency")
         if v == VERDICT_MATCH:
             per_level[level]["match"] += 1
