@@ -260,7 +260,13 @@ def evaluate_severity(policy: dict, context: dict) -> dict:
                     f"Admin policy ({obj}) + risky service — remove service only: {', '.join(found)}",
                     recommended=f"Keep policy, remove risky services only ({', '.join(found)})",
                 )
-            return done(7, f"Admin policy — keep ({obj})")
+            # 여기 도달했다면 유효 티켓이 없다(티켓 검사가 앞에 있다).
+            # 예외(면제)와 승인은 다른 축이다 — 역할상 정당한 접근이라도
+            # 결재 기록이 없으면 등록을 요청해야 한다. Keep으로 덮으면
+            # 미승인 정책이 영구히 검토 대상에서 사라진다(2026-08-10 대조).
+            if traffic_type == "Server-User":
+                return done(5, f"Admin policy ({obj}), no ticket ID — register")
+            return done(6, f"Admin policy ({obj}), no ticket ID — register")
 
     if is_risky:
         found = set(expanded_svcs) & risky_services
@@ -494,9 +500,10 @@ def _in_obj(obj: str, name: str, src, dst, src_names=None, dst_names=None) -> bo
       1) **주소 객체 이름**과의 부분 일치 — 고객이 예외 목록에 적는 것이
          객체명이므로 이게 본 경로다. 그룹 객체도 여기서 걸린다.
       2) 펼쳐진 주소값(display) — 예외 목록에 CIDR을 적은 경우.
-      3) 정책 이름 — 단어 경계를 요구한다. 부분 일치를 허용하면
-         "NW_ADMIN-07_..." 같은 이름만으로 무관한 정책이 통째로 예외가 된다
-         (2026-08-10 대조 정책 583). 명명 규칙은 약한 근거라 엄격히 본다.
+    정책 '이름'은 보지 않는다. "이름에 ADMIN이 들어간다"는 조직마다 다른
+    명명 관례일 뿐인데, 그것만으로 정책 전체가 검사 면제되면 감사 도구로서
+    위험하다(2026-08-10 대조 정책 583: DNS 정책이 이름 때문에 Keep 판정).
+    예외는 고객이 실제로 등록한 **객체**로만 인정한다.
     """
     needle = obj.lower()
     for t in (src_names or []) + (dst_names or []):
@@ -505,7 +512,7 @@ def _in_obj(obj: str, name: str, src, dst, src_names=None, dst_names=None) -> bo
     for t in (src or []) + (dst or []):
         if needle in str(t).lower():
             return True
-    return bool(name) and _kw_in_name(name, obj)
+    return False
 
 def _expand(svc_list, svc_groups: dict) -> list:
     """서비스 목록 전개 — 중첩 그룹 재귀 (순환 안전).
