@@ -413,7 +413,9 @@ def _add_action_plan_sheet(wb: Workbook, result: dict) -> None:
 
     ws = wb.create_sheet("Action Plan", 1)
     ws.sheet_view.showGridLines = False
-    headers = ["#", "Priority group", "Policy ID", "Policy Name",
+    # Type 열이 없으면 firewall 1번과 proxy 1번이 같은 "1"로 나란히 실린다.
+    # CLI가 비어 있는 조치(Needs review 등)에서는 구분할 단서가 아예 없다.
+    headers = ["#", "Priority group", "Type", "Policy ID", "Policy Name",
                "Why (reason)", "Suggested CLI", "Owner", "Done", "Notes"]
     for col, htxt in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=htxt)
@@ -432,22 +434,44 @@ def _add_action_plan_sheet(wb: Workbook, result: dict) -> None:
     # 강한 주장은 proof가 'config'라고 명시된 경우에만. 값이 없거나 모르는
     # 등급이면 약한 쪽으로 보낸다 — 기본값이 "설정상 확실"이면 새 등급이
     # 조용히 과대 주장으로 나간다.
+    """이 계획이 스스로의 증명을 무효로 만들 수 있다.
+
+    "정책 N은 절대 매칭되지 않는다"는 증명은 **N을 가리는 상위 정책이 켜져 있는
+    동안만** 참이다. 그런데 그 상위 정책이 같은 계획의 "Disable now"에 올라
+    있으면, 시키는 대로 상위를 끈 순간 아래 정책들이 되살아난다 — 그리고 계획은
+    그것들을 "확인 후 삭제"하라고 적어 뒀다. 순서를 안 알려주면 장애가 난다.
+    실제 샘플에서 6건 중 5건이 이 관계였다.
+    """
+    changed_ids = {p.get("policy_id") for p in all_policies
+                   if p.get("_ptype") == "firewall"
+                   and p.get("action_label") in (
+                       "Disable now", "Disable & monitor", "Remove (already inert)")}
+    changed_ids |= unreachable_ids   # 도달불가끼리 서로 가리는 경우도 있다
+
     for u in sorted(unreachable, key=lambda x: x.get("proof") != "config"):
         capture = u.get("proof") != "config"
+        shadower = u.get("shadowed_by")
+        depends = shadower in changed_ids
         ws.cell(row=r, column=1, value=n)   # 숫자로 저장해야 필터 정렬이 맞다
         write_text_cell(ws, r, 2, "Unreachable — verify before removing" if capture
                         else "Unreachable (provably never matches)")
         # 가장 강한 증거 그룹이 가장 밋밋하면 시각 위계가 역전된다
         ws.cell(row=r, column=2).fill = SEVERITY_FILLS[2 if capture else 1]
-        write_text_cell(ws, r, 3, str(u.get("policy_id", "")))
-        write_text_cell(ws, r, 4, str(u.get("name", "")))
-        write_text_cell(ws, r, 5,
+        write_text_cell(ws, r, 3, "firewall")   # reachability는 firewall 전용
+        write_text_cell(ws, r, 4, str(u.get("policy_id", "")))
+        write_text_cell(ws, r, 5, str(u.get("name", "")))
+        write_text_cell(ws, r, 6,
                         f"Shadowed by policy {u.get('shadowed_by')} — every packet "
                         "it could match is handled above it"
+                        + (f" **This holds only while policy {shadower} stays "
+                           "enabled, and this plan also proposes changing policy "
+                           f"{shadower}. Decide policy {shadower} first; if it is "
+                           "disabled or removed, re-run the analysis before "
+                           "touching this one.**" if depends else "")
                         + (" (not provable from the configuration alone; the "
                            "evidence can change over time, so re-check before "
                            "removing)" if capture else ""))
-        write_text_cell(ws, r, 6, _CLI_DISABLE.format(pid=u.get("policy_id", "")))
+        write_text_cell(ws, r, 7, _CLI_DISABLE.format(pid=u.get("policy_id", "")))
         r += 1; n += 1
 
     by_label: dict = {}
@@ -461,13 +485,14 @@ def _add_action_plan_sheet(wb: Workbook, result: dict) -> None:
         for p in by_label.get(label, []):
             ws.cell(row=r, column=1, value=n)
             write_text_cell(ws, r, 2, label)
-            write_text_cell(ws, r, 3, str(p.get("policy_id", "")))
-            write_text_cell(ws, r, 4, str(p.get("name", "")))
-            write_text_cell(ws, r, 5, str(p.get("reason", "")))
+            write_text_cell(ws, r, 3, "proxy" if p.get("_ptype") == "proxy" else "firewall")
+            write_text_cell(ws, r, 4, str(p.get("policy_id", "")))
+            write_text_cell(ws, r, 5, str(p.get("name", "")))
+            write_text_cell(ws, r, 6, str(p.get("reason", "")))
             if cli_tpl:
                 tpl = cli_tpl if p.get("_ptype") != "proxy"                       else cli_tpl.replace("config firewall policy",
                                            "config firewall proxy-policy")
-                write_text_cell(ws, r, 6, tpl.format(pid=p.get("policy_id", "")))
+                write_text_cell(ws, r, 7, tpl.format(pid=p.get("policy_id", "")))
             sev = p.get("urgency", 0)
             ws.cell(row=r, column=2).fill = SEVERITY_FILLS.get(sev, SEVERITY_FILLS[0])
             r += 1; n += 1
@@ -478,7 +503,7 @@ def _add_action_plan_sheet(wb: Workbook, result: dict) -> None:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
 
     if r > 2:
-        ws.auto_filter.ref = f"A1:I{r - 1}"
+        ws.auto_filter.ref = f"A1:J{r - 1}"   # Type 열 추가로 한 칸 늘었다
         r += 1
         note = ws.cell(row=r, column=1, value=(
             "Note: on multi-VDOM devices, enter the policy's VDOM first "
@@ -486,9 +511,9 @@ def _add_action_plan_sheet(wb: Workbook, result: dict) -> None:
             "Review each change with the policy owner; disabling is reversible, "
             "deletion is not."))
         note.alignment = Alignment(wrap_text=True)
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
-    for col, w in (("A", 6), ("B", 26), ("C", 10), ("D", 32), ("E", 48),
-                   ("F", 34), ("G", 14), ("H", 8), ("I", 24)):
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=10)
+    for col, w in (("A", 6), ("B", 26), ("C", 9), ("D", 10), ("E", 32),
+                   ("F", 48), ("G", 34), ("H", 14), ("I", 8), ("J", 24)):
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
 

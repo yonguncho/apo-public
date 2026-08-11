@@ -331,18 +331,25 @@ def export_csv(to_disable: list[dict], already_disabled: list[dict]) -> bytes:
     """UTF-8 BOM CSV 바이트 반환 (Excel 한글 호환)."""
     output = io.StringIO()
     writer = csv.writer(output)
+    # 정책 종류를 반드시 적는다. 이 CSV는 운영자가 손으로 실행하는 변경 문서인데,
+    # FortiGate는 firewall과 proxy 정책에 각각 1번부터 번호를 매긴다. 종류가 없으면
+    # proxy 12번 행을 보고 `config firewall policy / edit 12`를 쳐서 **무관한 살아
+    # 있는 정책**을 끄게 된다(실 config에서 fw/proxy ID 충돌 44건 관측).
     writer.writerow([
-        "Category", "Policy ID", "Policy Name",
+        "Category", "Policy Type", "Policy ID", "Policy Name",
         "Risk Level", "Source IP", "Destination IP",
-        "Service", "Schedule", "Reason",
+        "Service", "Schedule", "Reason", "CLI Context",
     ])
 
     def row(category: str, p: dict) -> list:
-        return [category] + [
+        ptype = "proxy" if str(p.get("type", "")).strip().lower() == "proxy" else "firewall"
+        cli_ctx = ("config firewall proxy-policy" if ptype == "proxy"
+                   else "config firewall policy")
+        return [category, ptype] + [
             _csv_safe(p.get(f, ""))
             for f in ("policy_id", "name", "risk_level", "srcaddr",
                       "dstaddr", "service", "schedule", "reason")
-        ]
+        ] + [cli_ctx]
 
     for p in to_disable:
         writer.writerow(row("Disable Candidate", p))

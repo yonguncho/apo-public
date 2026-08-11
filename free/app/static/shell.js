@@ -322,11 +322,26 @@
     const groups = [];
     const seen = new Set();
 
-    // 도달 불가는 증거가 가장 강하므로 맨 위에 둔다(엑셀 Action Plan과 동일 순서).
+    /* 도달 불가는 증거가 가장 강하므로 맨 위에 둔다(엑셀 Action Plan과 동일 순서).
+
+       단, "절대 매칭 안 됨"은 **가리는 상위 정책이 켜져 있는 동안만** 참이다.
+       그 상위 정책이 같은 계획에서 끄라고 지목돼 있으면, 시키는 대로 상위를 끈
+       순간 아래 정책들이 되살아난다 — 그리고 계획은 그걸 삭제하라고 적어 뒀다.
+       순서를 안 알려주면 장애가 난다(샘플에서 6건 중 5건이 이 관계였다). */
+    const willChange = new Set(
+      pols.filter((p) => p._ptype === "firewall" &&
+        ["Disable now", "Disable & monitor", "Remove (already inert)"].includes(p.action_label))
+        .map((p) => p.policy_id));
+    (state.reach?.unreachable || []).forEach((u) => willChange.add(u.policy_id));
+
     const un = (state.reach?.unreachable || []).map((u) => ({
       policy_id: u.policy_id, name: u.name, _ptype: "firewall",
-      reason: `Never matches traffic — policy ${u.shadowed_by} above it already handles everything it could match`,
+      reason: `Never matches traffic — policy ${u.shadowed_by} above it already handles everything it could match`
+        + (willChange.has(u.shadowed_by)
+           ? ` — but this plan also changes policy ${u.shadowed_by}. Decide that one first; if it is disabled, re-run the assessment before touching this policy.`
+           : ""),
       action_label: "Unreachable", proof: u.proof,
+      dependsOn: willChange.has(u.shadowed_by) ? u.shadowed_by : null,
     }));
     /* 원래 조치 라벨(Register ticket 등)과 무관하게 disable 명령을 준다.
        명령 없는 조치 규칙의 예외로 보일 수 있지만 의도한 것이다 — 도달불가는

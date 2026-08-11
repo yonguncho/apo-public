@@ -380,10 +380,20 @@ async function importPolicyCsv(file, type) {
   window.APO?.onUsage?.(_statsCount(currentRuntimeStats));
   await rerenderWithRuntimeStats();
 
-  // severity 결과가 있으면 자동 재분류 (sevData는 다른 IIFE 스코프이므로 window 플래그로 감지)
+  /* severity 결과가 있으면 자동 재분류 (sevData는 다른 IIFE 스코프이므로 window
+     플래그로 감지). 실패는 Findings의 상태줄에만 뜨는데 사용자는 지금 Sources에
+     있다 — 여기 "적용됨" 초록 문구만 보고 재판정이 됐다고 믿게 된다. 결과를
+     확인해서 이 화면에도 알린다. */
   if (window.__sevHasData) {
-    const runBtn = document.getElementById('sevClassifyBtn');
-    if (runBtn) runBtn.click();
+    if (typeof window.__apoRunClassify === 'function') {
+      await window.__apoRunClassify();
+      if (!window.__sevHasData) {
+        const why = document.getElementById('sevClassifyStatus')?.textContent || '';
+        policyStatsStatus.textContent =
+          `${type} Policy CSV imported, but re-assessment failed — the findings still `
+          + `reflect the previous run. ${why}`;
+      }
+    }
   }
 }
 
@@ -1556,6 +1566,14 @@ document.addEventListener('click', e => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error||'Classification failed');
       sevData=data;
+      /* 걸어 둔 등급이 이번 결과에 없으면 필터를 푼다. 그대로 두면 칩이 사라져
+         해제할 수단이 없는 채 "No policies match"만 남는다 — CSV를 넣어 판정이
+         좋아졌을 때 "아무것도 못 찾았다"로 읽힌다. */
+      if (activeSevFilter != null) {
+        const levels = new Set([...(data.firewall||[]), ...(data.proxy||[])]
+          .map(p => p.urgency ?? 0));
+        if (!levels.has(activeSevFilter)) activeSevFilter = null;
+      }
       window.__sevHasData = true;   // CSV 임포트 후 자동 재분류 트리거용(스코프 밖 접근)
       renderSummaryBar(data); renderTable(); renderReachability(data.reachability);
       window.APO?.onFindings?.(data);
@@ -1612,6 +1630,9 @@ document.addEventListener('click', e => {
   });
   if (rangeInput) rangeInput.addEventListener('keydown',e=>{ if(e.key==='Enter') rangeAddBtn?.click(); });
   if (classifyBtn) classifyBtn.addEventListener('click',runClassify);
+  /* CSV 임포트가 재분류 '완료'를 기다려야 실패를 그 화면에 알릴 수 있다.
+     버튼 click()은 핸들러의 promise를 돌려주지 않으므로 함수 자체를 노출한다. */
+  window.__apoRunClassify = runClassify;
 
   document.querySelectorAll('.sev-subtab-btn').forEach(btn=>{
     btn.addEventListener('click',()=>{
@@ -1925,6 +1946,10 @@ document.addEventListener('click', e => {
     return `<tr>
       <td><input type="checkbox" class="rem-check" data-id="${esc(p.policy_id)}" data-type="${esc(p.type||'firewall')}"></td>
       <td>${esc(p.policy_id)}</td>
+      <!-- firewall과 proxy 정책은 각각 1번부터 번호를 매긴다. 종류를 안 적으면
+           "12"가 두 줄 보이고, 되돌릴 수 없는 변경을 승인하는 화면에서 어느
+           쪽인지 구분할 수 없다. -->
+      <td class="rem-td-muted">${esc((p.type || 'firewall') === 'proxy' ? 'proxy' : 'firewall')}</td>
       <td>${esc(p.name)}</td>
       <td><span class="rem-risk ${riskClass(p.risk_level)}">${esc(p.risk_level)}</span></td>
       <td class="rem-td-muted">${esc(p.srcaddr||'—')}</td>
@@ -2041,7 +2066,8 @@ document.addEventListener('click', e => {
     const shown = (document.getElementById('stDevice')?.textContent || '').trim();
     const src = shown && shown !== 'No configuration loaded' ? shown : '';
     // 정책이 많으면 번호를 다 늘어놓느라 모달이 버튼까지 밀어낸다. 앞 12개만.
-    const idList = selectedPolicies.map(p => p.policy_id);
+    const idList = selectedPolicies.map(p =>
+      `${(p.type || 'firewall') === 'proxy' ? 'proxy' : 'fw'} ${p.policy_id}`);
     const ids = idList.length > 12
       ? `${idList.slice(0, 12).join(', ')} and ${idList.length - 12} more`
       : idList.join(', ');
@@ -2101,6 +2127,12 @@ Candidates came from the configuration currently loaded (${src}).` : '')
         _candidates = {to_disable:[], already_disabled:[]};
         ['remActiveHeader','remCriticalSection','remHighSection','remDisabledSection']
           .forEach(id => { const el = $(id); if (el) el.style.display = 'none'; });
+        /* 섹션만 숨기면 체크된 행이 DOM에 살아남아 updateApplyBtn이 "선택 있음"
+           으로 세고, Apply가 빈 목록 위에서 활성으로 남는다(누르면 "0 policy(ies)"
+           확인창이 뜬다). 내용까지 비운다. */
+        ['#remCriticalTable tbody','#remHighTable tbody','#remDisabledTable tbody']
+          .forEach(sel => { const t = document.querySelector(sel); if (t) t.innerHTML = ''; });
+        const chk = $('remCheckAll'); if (chk) chk.checked = false;
         updateApplyBtn();
         if(statusEl) statusEl.textContent =
           `${done} Could not refresh the candidate list — reload it before applying anything else.`;
