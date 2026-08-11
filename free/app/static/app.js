@@ -840,7 +840,7 @@ renderActiveTab();
    MSP URL이 아직 안 채워졌으면 스토어 첫 화면으로 보낸다 — 깨진 체크아웃보다
    낫고, 거기서 상품을 고르면 결과는 같다. */
 const LEMON_CHECKOUT_URL = 'https://choiceguidelab.lemonsqueezy.com/checkout/buy/1c83b59f-7f23-4899-a173-dc43d1c7bce6';
-const LEMON_CHECKOUT_URL_MSP = '';   // TODO: MSP/Consultant 상품의 checkout/buy URL
+const LEMON_CHECKOUT_URL_MSP = 'https://choiceguidelab.lemonsqueezy.com/checkout/buy/19b221bc-420d-4a41-8212-fef57fd267bd';
 const LEMON_STORE_URL = 'https://choiceguidelab.lemonsqueezy.com/';
 
 let _licensed = null;  // null=미확인, true/false

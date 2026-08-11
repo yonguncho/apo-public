@@ -183,7 +183,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v91-2026-08-11"
+APO_VERSION = "v92-2026-08-11"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -195,7 +195,8 @@ def _stats_count(runtime_stats) -> int:
     if not isinstance(runtime_stats, dict):
         return 0
     if "firewall" in runtime_stats or "proxy" in runtime_stats:
-        return sum(len(v) for v in runtime_stats.values() if isinstance(v, dict))
+        # 섞인 dict에서 평평한 항목의 '필드 수'를 정책 수로 세지 않도록 한정한다.
+        return sum(len(runtime_stats.get(k) or {}) for k in ("firewall", "proxy"))
     return len(runtime_stats)
 
 
@@ -743,7 +744,9 @@ def create_app() -> Flask:
                 "thresholds": context["thresholds"],
                 "rules": context["rules"],
                 "user_range_count": 1,
-                "csv_loaded": bool(runtime_stats),
+                # {"firewall":{},"proxy":{}}는 비어 있어도 truthy다. 번들 CSV가
+                # 빠지거나 파싱에 실패해도 "사용량 있음"이라고 적히면 안 된다.
+                "csv_loaded": _stats_count(runtime_stats) > 0,
                 # 이게 실제 장비 보고서로 오해되면 안 된다.
                 "sample": True,
             },
