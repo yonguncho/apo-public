@@ -416,16 +416,28 @@ def _add_action_plan_sheet(wb: Workbook, result: dict) -> None:
     # reachability는 firewall 정책만 검사한다 — ID만으로 중복 제거하면
     # 같은 번호의 proxy 정책 조치가 소리 없이 사라진다(재비판 NEW-BUG).
     unreachable_ids = {u.get("policy_id") for u in unreachable}
-    for u in unreachable:
+    # 증명 등급을 조치 이름에 드러낸다. config 근거는 설정이 바뀌기 전까지
+    # 영구히 참이지만, capture 근거는 DNS 캐시를 뜬 시점의 해석에 기댄다 —
+    # FQDN이 다른 IP로 풀리면 그 정책은 다시 살아난다. 둘을 같은 이름으로
+    # 적으면 시한부 근거가 영구 증명으로 읽힌다(재비판 3회전).
+    # 강한 주장은 proof가 'config'라고 명시된 경우에만. 값이 없거나 모르는
+    # 등급이면 약한 쪽으로 보낸다 — 기본값이 "설정상 확실"이면 새 등급이
+    # 조용히 과대 주장으로 나간다.
+    for u in sorted(unreachable, key=lambda x: x.get("proof") != "config"):
+        capture = u.get("proof") != "config"
         ws.cell(row=r, column=1, value=n)   # 숫자로 저장해야 필터 정렬이 맞다
-        write_text_cell(ws, r, 2, "Unreachable (provably never matches)")
+        write_text_cell(ws, r, 2, "Unreachable — verify before removing" if capture
+                        else "Unreachable (provably never matches)")
         # 가장 강한 증거 그룹이 가장 밋밋하면 시각 위계가 역전된다
-        ws.cell(row=r, column=2).fill = SEVERITY_FILLS[1]
+        ws.cell(row=r, column=2).fill = SEVERITY_FILLS[2 if capture else 1]
         write_text_cell(ws, r, 3, str(u.get("policy_id", "")))
         write_text_cell(ws, r, 4, str(u.get("name", "")))
         write_text_cell(ws, r, 5,
                         f"Shadowed by policy {u.get('shadowed_by')} — every packet "
-                        "it could match is handled above it")
+                        "it could match is handled above it"
+                        + (" (not provable from the configuration alone; the "
+                           "evidence can change over time, so re-check before "
+                           "removing)" if capture else ""))
         write_text_cell(ws, r, 6, _CLI_DISABLE.format(pid=u.get("policy_id", "")))
         r += 1; n += 1
 
@@ -496,9 +508,11 @@ def _add_unreachable_sheet(wb: Workbook, result: dict) -> None:
         for col, key in enumerate(("policy_id", "name", "shadowed_by",
                                    "shadowed_by_name", "shadowed_by_action",
                                    "proof", "detail"), 1):
-            # proof: config = 설정만으로 증명 / capture = DNS 캐시 수집 시점 기준
+            # proof: config = 설정만으로 증명 / capture = DNS 캐시 수집 시점 기준.
+            # 값이 없으면 "unverified" — 약한 쪽으로 두되, 있지도 않은 DNS 수집을
+            # 주장하지도 않는다. Action Plan 시트도 같은 행을 약한 그룹에 넣는다.
             write_text_cell(ws, r, col, str(u.get(key, "") or
-                                            ("config" if key == "proof" else "")))
+                                            ("unverified" if key == "proof" else "")))
         r += 1
 
     r += 1

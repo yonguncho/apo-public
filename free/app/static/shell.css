@@ -1,0 +1,214 @@
+/* ═══════════════════════════════════════════════════════════════
+   APO shell — 정보 구조 레이어 (styles.css 위에 얹는다)
+
+   설계 원칙
+   1. 지금 보는 숫자가 '무엇의' 숫자인지 항상 보이게 한다 → 상태 바.
+   2. 첫 화면은 폼이 아니라 상태다. 데이터가 없으면 무엇을 해야 하는지,
+      있으면 무엇이 문제인지 먼저 말한다.
+   3. 근거의 한계를 숨기지 않는다 → 커버리지 패널이 결과와 같은 위계에 있다.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 헤더 우측 칩 ─────────────────────────────────────────────── */
+.app-header-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.hdr-right { display: flex; align-items: center; gap: 8px; }
+.hdr-chip {
+  font-size: 12px; font-weight: 600; letter-spacing: .01em;
+  padding: 5px 11px; border-radius: 999px;
+  background: var(--card-alt); color: var(--muted);
+  border: 1px solid var(--border);
+}
+.hdr-chip.is-paid { background: var(--purple-bg); color: var(--purple); border-color: var(--purple); }
+
+/* ── 상태 바 ─────────────────────────────────────────────────── */
+.statusbar { background: var(--surface); border-bottom: 1px solid var(--border); }
+.statusbar-inner {
+  max-width: 1440px; margin: 0 auto; padding: 10px 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+}
+/* 긴 hostname이 칩을 밀어내지 않게 잘라서 보여주고, 전체는 title로 남긴다.
+   (전에 Config summary에서 hostname이 잘려 일부만 보이던 지적과 같은 계열) */
+.st-device { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 240px; }
+.st-device-name { font-size: 14px; font-weight: 650; color: var(--text-strong);
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-device-sub { font-size: 11.5px; color: var(--muted);
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.st-chip {
+  font-size: 11.5px; font-weight: 600; padding: 4px 10px 4px 22px;
+  border-radius: 999px; position: relative; white-space: nowrap;
+  background: var(--card-alt); border: 1px solid var(--border); color: var(--muted);
+}
+.st-chip::before {
+  content: ""; position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  width: 7px; height: 7px; border-radius: 50%; background: var(--faint);
+}
+.st-chip.is-on { color: var(--green); border-color: rgba(34,197,94,.35); background: var(--green-bg); }
+.st-chip.is-on::before { background: var(--green); }
+.st-chip.is-warn { color: var(--yellow); border-color: rgba(234,179,8,.35); background: var(--yellow-bg); }
+.st-chip.is-warn::before { background: var(--yellow); }
+/* 미충족은 '아직 안 함'이지 오류가 아니다 — 회색으로 조용히 둔다. */
+.st-chip.is-off { color: var(--muted); }
+
+/* ── 네비게이션 ──────────────────────────────────────────────── */
+.app-nav-inner { max-width: 1440px; margin: 0 auto; padding: 0 24px; display: flex; gap: 4px; }
+.view-switch-btn { position: relative; }
+.container { max-width: 1440px; }
+
+/* ── 뷰 헤더 ─────────────────────────────────────────────────── */
+.view-head { margin: 26px 0 20px; }
+.view-head h1 { margin: 0 0 6px; font-size: 24px; font-weight: 700; color: var(--text-strong); letter-spacing: -.02em; }
+.view-head p { margin: 0; max-width: 78ch; font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+
+/* ── 패널 ────────────────────────────────────────────────────── */
+.panel {
+  display: block; background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); margin-bottom: 20px; overflow: hidden;
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 16px 20px; border-bottom: 1px solid var(--border-soft); flex-wrap: wrap;
+}
+.panel-head h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--text-strong); }
+.panel-hint { font-size: 12px; color: var(--muted); }
+.panel-actions { display: flex; align-items: center; gap: 10px; }
+.panel-body { padding: 18px 20px; }
+.panel-collapsible > summary {
+  cursor: pointer; padding: 16px 20px; display: flex; align-items: center; gap: 12px;
+  list-style: none;
+}
+.panel-collapsible > summary::-webkit-details-marker { display: none; }
+.panel-collapsible > summary h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--text-strong); }
+.panel-collapsible > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+.panel-collapsible[open] > summary::after { content: "▾"; }
+.panel-collapsible[open] > summary { border-bottom: 1px solid var(--border-soft); }
+
+/* ── Overview: 빈 상태 ───────────────────────────────────────── */
+.ov-empty { max-width: 720px; margin: 64px auto; text-align: center; }
+.ov-empty h1 { font-size: 30px; font-weight: 750; color: var(--text-strong); margin: 0 0 14px; letter-spacing: -.025em; }
+.ov-empty p { font-size: 14.5px; line-height: 1.7; color: var(--muted); margin: 0 0 26px; }
+.ov-empty-actions { display: flex; gap: 10px; justify-content: center; margin-bottom: 38px; }
+.ov-empty-steps { display: grid; gap: 10px; text-align: left; max-width: 520px; margin: 0 auto; }
+.ov-empty-steps > div {
+  display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted);
+  padding: 12px 16px; background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+}
+.ov-empty-steps span {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ── Overview: 결과 상태 ─────────────────────────────────────── */
+.ov-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin: 26px 0 20px; flex-wrap: wrap; }
+.ov-head h1 { margin: 0 0 6px; font-size: 24px; font-weight: 700; color: var(--text-strong); letter-spacing: -.02em; }
+.ov-sub { margin: 0; font-size: 13px; color: var(--muted); }
+.ov-head-actions { display: flex; gap: 10px; }
+
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.metric-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 4px;
+}
+.metric-card[data-goto] { cursor: pointer; transition: border-color .15s, transform .15s; }
+.metric-card[data-goto]:hover { border-color: var(--accent); transform: translateY(-1px); }
+.metric-label { font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.metric-value { font-size: 30px; font-weight: 750; color: var(--text-strong); line-height: 1.1; letter-spacing: -.02em; }
+.metric-note { font-size: 11.5px; color: var(--faint); }
+.metric-card.is-critical .metric-value { color: var(--red); }
+.metric-card.is-action .metric-value { color: var(--orange); }
+
+.ov-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px; }
+@media (max-width: 1000px) { .ov-grid { grid-template-columns: 1fr; } }
+
+/* 심각도 분포 — 폭이 곧 비율이다 */
+.ov-sevbar { display: flex; height: 34px; margin: 18px 20px 12px; border-radius: 8px; overflow: hidden; background: var(--card-alt); }
+.ov-sevbar-seg { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #0b0d13; cursor: pointer; transition: filter .15s; min-width: 0; }
+.ov-sevbar-seg:hover { filter: brightness(1.15); }
+.ov-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 0 20px 18px; }
+.ov-legend-item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.ov-legend-dot { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.ov-legend-item strong { color: var(--text); font-weight: 650; }
+
+/* 조치 목록 */
+.ov-actions { padding: 8px 12px 14px; }
+.ov-action-row {
+  display: flex; align-items: center; gap: 12px; padding: 9px 8px;
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.ov-action-row:hover { background: var(--card-alt); }
+.ov-action-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--card-alt); overflow: hidden; }
+.ov-action-bar > i { display: block; height: 100%; background: var(--accent); }
+.ov-action-name { font-size: 13px; color: var(--text); min-width: 150px; }
+.ov-action-count { font-size: 13px; font-weight: 700; color: var(--text-strong); min-width: 44px; text-align: right; }
+
+/* 근거 커버리지 — 결과와 같은 위계로 둔다 */
+.ov-gaps { padding: 6px 20px 18px; display: grid; gap: 10px; }
+.ov-gap {
+  display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px;
+  border-radius: var(--radius-md); border: 1px solid var(--border-soft); background: var(--card-alt);
+}
+.ov-gap.is-ok { border-color: rgba(34,197,94,.25); }
+.ov-gap.is-warn { border-color: rgba(234,179,8,.3); }
+.ov-gap-icon { flex: none; font-size: 13px; line-height: 1.5; }
+.ov-gap-body { min-width: 0; }
+.ov-gap-title { font-size: 13px; font-weight: 650; color: var(--text-strong); margin-bottom: 2px; }
+.ov-gap-text { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+.ov-gap-act { margin-left: auto; flex: none; }
+
+/* ── Findings 하위 탭 ────────────────────────────────────────── */
+.fnd-tabs { display: flex; gap: 4px; margin: 4px 0 18px; border-bottom: 1px solid var(--border); }
+.fnd-tab {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 10px 16px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer;
+}
+.fnd-tab:hover { color: var(--text); }
+.fnd-tab.active { color: var(--accent2); border-bottom-color: var(--accent); }
+
+/* ── Action Plan ─────────────────────────────────────────────── */
+.ap-groups { padding: 4px 0 8px; }
+.ap-group { border-top: 1px solid var(--border-soft); }
+.ap-group:first-child { border-top: none; }
+.ap-group-head {
+  display: flex; align-items: center; gap: 12px; padding: 13px 20px;
+  background: var(--card-alt); cursor: pointer;
+}
+.ap-group-rank {
+  flex: none; width: 22px; height: 22px; border-radius: 6px; font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; background: var(--accent); color: #fff;
+}
+.ap-group-name { font-size: 13.5px; font-weight: 650; color: var(--text-strong); }
+.ap-group-why { font-size: 12px; color: var(--muted); }
+.ap-group-count { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--muted); }
+.ap-rows { display: none; }
+.ap-group.open .ap-rows { display: block; }
+.ap-row {
+  display: grid; grid-template-columns: 26px 62px 1fr auto; gap: 12px; align-items: start;
+  padding: 11px 20px; border-top: 1px solid var(--border-soft); font-size: 12.5px;
+}
+.ap-check { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--teal); cursor: pointer; }
+.ap-row.done { opacity: .45; }
+.ap-row.done .ap-row-name { text-decoration: line-through; }
+.ap-row-id { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ap-row-name { color: var(--text-strong); font-weight: 600; word-break: break-word; }
+.ap-row-reason { color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.ap-cli {
+  margin-top: 7px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px; color: var(--teal); background: #0b0e15;
+  border: 1px solid var(--border-soft); border-radius: 6px; padding: 8px 10px;
+  white-space: pre-wrap; word-break: break-all;
+}
+/* 명령이 없는 조치의 다음 단계 — CLI 상자와 확실히 달라 보여야 한다.
+   비슷하게 생기면 "복사해서 붙여넣을 것"으로 읽힌다. */
+.ap-nocli {
+  margin-top: 7px; font-size: 11.5px; color: var(--muted); font-style: italic;
+  border-left: 2px solid var(--border-soft); padding: 2px 0 2px 10px;
+}
+.ap-copy { flex: none; }
+
+/* ── 공통 소품 ───────────────────────────────────────────────── */
+.hidden { display: none !important; }
+.mini-btn {
+  font-size: 11.5px; padding: 5px 10px; border-radius: 6px; cursor: pointer;
+  background: var(--card-alt); color: var(--muted); border: 1px solid var(--border);
+}
+.mini-btn:hover { color: var(--text-strong); border-color: var(--accent); }

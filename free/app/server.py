@@ -183,11 +183,23 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v89-2026-08-10"
+APO_VERSION = "v90-2026-08-10"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _config_sha(raw: str) -> str:
+    """설정 원문의 SHA-256 앞 16자. 장비/스냅샷을 가리키는 안정된 식별자다.
+
+    hostname은 공장 기본값 'FortiGate' 그대로인 장비가 흔해 서로 다른 고객
+    장비가 같은 이름을 갖는다. 화면이 장비별로 기억하는 것(작업 완료 체크 등)을
+    hostname에 걸면 그 장비들끼리 상태가 섞인다.
+    """
+    import hashlib
+    return hashlib.sha256((raw or "").encode("utf-8", "replace")).hexdigest()[:16]
+
 
 print(f"[APO] Version: {APO_VERSION}", flush=True)
 print(f"[APO] Frozen: {getattr(_sys, 'frozen', False)}", flush=True)
@@ -370,6 +382,9 @@ def create_app() -> Flask:
             {
                 "message": "Config parsed successfully",
                 "filename": filename,
+                # 이 설정을 가리키는 안정된 식별자. hostname은 공장 기본값
+                # "FortiGate"로 남아 있는 장비가 흔해 장비 구분에 못 쓴다.
+                "config_sha": _config_sha(raw),
                 "parsed": parsed,
                 "view": view,
                 "export_json": export_name,
@@ -797,7 +812,12 @@ def create_app() -> Flask:
         return jsonify({
             "ok": True,
             "hostname": (parsed.get("meta") or {}).get("hostname", ""),
+            "config_sha": _config_sha(data["config_text"]),
             "policies": len(view.get("firewall_policy", [])),
+            # 화면은 이 값으로 "사용량 데이터가 있는가"를 판단한다. 개수만 주고
+            # 본문을 빼면, 장비에서 통계를 잘 받아온 직후에도 화면은 "사용량
+            # 없음"이라고 경고한다(재비판 3회전).
+            "runtime_stats": data["runtime_stats"],
             "stats_count": len(data["runtime_stats"]),
             "fqdn_count": len(data["fqdn_map"]),
             "warnings": warnings,
@@ -976,6 +996,22 @@ def create_app() -> Flask:
             return jsonify({"error": "token is required"}), 400
         app.config['remediation_device'] = device
         return jsonify({"ok": True})
+
+    @app.get("/api/remediation/device")
+    def remediation_device_get():
+        """등록된 장비를 알려준다 — 토큰은 절대 내보내지 않는다.
+
+        되돌릴 수 없는 변경을 확인시키는 창이 입력칸 값을 읽으면, 사용자가 저장
+        뒤에 칸만 고쳐 놓은 경우 실제 적용 대상과 다른 장비를 보여준다. 적용은
+        서버가 들고 있는 이 값으로 나가므로, 확인창도 같은 값을 보여야 한다.
+        """
+        d = app.config.get('remediation_device') or {}
+        return jsonify({
+            "registered": bool(d.get("ip")),
+            "ip": d.get("ip", ""),
+            "port": d.get("port", 443),
+            "vdom": d.get("vdom", ""),
+        })
 
     @app.get("/api/remediation/device/test")
     def remediation_device_test():
