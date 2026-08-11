@@ -260,6 +260,50 @@ function applyLoadedConfig(data, sourceLabel) {
   notifyConfigLoaded(sourceLabel, data.filename, data.config_sha);
 }
 
+/* ISDB·geography 지원 확인 — 응답 형태만 본다.
+   파서를 만들기 전에 실물을 보기 위한 것이지, 기능이 아니다. */
+(() => {
+  const btn = document.getElementById('probeBtn');
+  const out = document.getElementById('probeResult');
+  const st = document.getElementById('collectStatus');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const ip = document.getElementById('collIp')?.value.trim();
+    const token = document.getElementById('collToken')?.value.trim();
+    if (!ip || !token) { if (st) st.textContent = 'Enter the device IP and API token first.'; return; }
+    btn.disabled = true;
+    if (st) st.textContent = 'Checking which data this device exposes over REST...';
+    try {
+      const r = await fetch('/api/collect/probe', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          ip, token,
+          port: Number(document.getElementById('collPort')?.value || 443),
+          verify_ssl: !(document.getElementById('collSkipSsl')?.checked),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Probe failed');
+      const ok = d.results.filter(x => x.status === 200);
+      if (out) {
+        out.style.display = '';
+        const NL = String.fromCharCode(10);
+        out.textContent = d.results.map(x => {
+          const head = String(x.status === null || x.status === undefined ? 'ERR' : x.status).padEnd(4)
+            + ' ' + x.path + NL;
+          if (!x.sample) return head;
+          const body = String(x.sample).slice(0, 500).split(NL).join(NL + '     ');
+          return head + '     ' + body + NL;
+        }).join('');
+      }
+      if (st) st.textContent = `${ok.length} of ${d.results.length} endpoints responded. `
+        + 'Send the output below to the developer — the parser is written from the real shape, not a guess.';
+    } catch (e) {
+      if (st) st.textContent = e.message || 'Probe failed';
+    } finally { btn.disabled = false; }
+  });
+})();
+
 (() => {
   const btn = document.getElementById('collectBtn');
   const st = document.getElementById('collectStatus');
@@ -1051,7 +1095,7 @@ document.addEventListener('click', e => {
   function buildPolicyChangeList(before, after){ const ignore=new Set(["policy_id","_edit","uuid"]); const keys=new Set([...Object.keys(before||{}),...Object.keys(after||{})]); const changes=[]; keys.forEach(key=>{ if(ignore.has(key)) return; const oldVal=normalizeValue(before?before[key]:null); const newVal=normalizeValue(after?after[key]:null); if(oldVal!==newVal) changes.push({label:humanizeKey(key),before:oldVal,after:newVal}); }); return changes; }
   /* 화면 전환은 shell.js가 소유한다. 여기서는 뷰 목록을 하드코딩하지 않고
      data-view 값과 같은 이름의 섹션을 찾아 켜기만 한다(새 뷰 추가 시 무수정). */
-  const VIEW_SECTION={overview:"overviewView",analysis:"analysisView",severity:"severityView",remediation:"remediationView",diff:"diffView",settings:"settingsView",advisor:"severityView"};
+  const VIEW_SECTION={overview:"overviewView",analysis:"analysisView",severity:"severityView",remediation:"remediationView",diff:"diffView",evidence:"evidenceView",settings:"settingsView",reference:"referenceView",advisor:"severityView"};
   function setView(mode){ if(window.APO&&typeof window.APO.setView==="function"){ window.APO.setView(mode); return; } switchButtons.forEach(b=>b.classList.toggle("active", b.getAttribute("data-view")===mode)); document.querySelectorAll(".page-view").forEach(v=>v.classList.add("hidden")); const target=document.getElementById(VIEW_SECTION[mode]||"overviewView"); target?.classList.remove("hidden"); window.scrollTo({top:0,behavior:"smooth"}); }
   switchButtons.forEach(btn=>btn.addEventListener("click",()=>setView(btn.getAttribute("data-view"))));
   if(oldBtn&&oldInput){ oldBtn.addEventListener("click",()=>oldInput.click()); oldInput.addEventListener("change",()=>{ const f=oldInput.files&&oldInput.files[0]; const label=document.getElementById("selectedOldConfigName"); if(label) label.textContent=f?f.name:"No file selected"; });}

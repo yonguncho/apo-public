@@ -183,7 +183,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v93-2026-08-11"
+APO_VERSION = "v94-2026-08-11"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
@@ -673,6 +673,30 @@ def create_app() -> Flask:
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={"Content-Disposition": "attachment; filename=severity_export.xlsx"}
         )
+
+    @app.post("/api/collect/probe")
+    def collect_probe():
+        """ISDB·geography 후보 엔드포인트를 두드려 응답 형태만 보고한다.
+
+        파싱하지 않는다. v85에서 `dnsproxy 6` 출력 형식을 추정해 파서를 만들었다가
+        첫 실사용에서 통째로 깨진 적이 있어, **실물 응답을 보기 전에는 파서를
+        만들지 않는다**는 원칙을 세웠다. 이 라우트는 그 실물을 뜨기 위한 것이다.
+        """
+        payload = request.get_json(silent=True) or {}
+        device, err = _resolve_device(payload)
+        if err:
+            return err
+        from app.services.device_collector import probe_endpoints
+        try:
+            rows = probe_endpoints(device)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            print(f"[APO] probe failed: {exc}", flush=True)
+            return jsonify({"error": "Probe failed — see the console for details."}), 502
+        return jsonify({"results": rows,
+                        "hint": "200을 준 경로의 sample을 개발자에게 전달하면 "
+                                "그 형태에 맞는 파서를 만듭니다."})
 
     # ── 샘플 리포트 (무료) ────────────────────────────────────────────────
     # 이 도구의 가치는 결국 엑셀 산출물인데, 지금까지는 **사기 전에 그걸 볼

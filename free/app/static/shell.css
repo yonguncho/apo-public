@@ -231,3 +231,63 @@
 .tier-price { font-size: 17px; font-weight: 750; color: var(--text-strong); letter-spacing: -.02em; }
 .tier-feat { margin: 0; padding-left: 16px; font-size: 11.5px; line-height: 1.65; color: var(--muted); }
 .tier-feat strong { color: var(--text); font-weight: 650; }
+
+/* ── 좌측 사이드바 ───────────────────────────────────────────────
+   가로 탭 한 줄로는 하위 항목을 담을 수 없어 Findings 안에 또 탭을 뒀고,
+   그 2단 구조가 어수선함의 큰 축이었다. 사이드바가 하위 항목을 품는다. */
+.app-body { display: flex; align-items: flex-start; }
+.app-side {
+  position: sticky; top: 0; align-self: stretch;
+  width: 232px; flex: none; padding: 14px 10px 24px;
+  border-right: 1px solid var(--border); background: var(--surface);
+  display: flex; flex-direction: column; gap: 2px; min-height: calc(100vh - 0px);
+  transition: width .16s ease;
+}
+.app-body > .container { flex: 1 1 auto; min-width: 0; max-width: 1280px; padding-left: 28px; padding-right: 28px; }
+
+.side-item {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 9px 12px; border: none; background: none; border-radius: var(--radius-md);
+  font-size: 13.5px; font-weight: 550; color: var(--muted); cursor: pointer;
+  text-align: left; white-space: nowrap; overflow: hidden;
+}
+.side-item:hover { background: var(--card-alt); color: var(--text); }
+.side-item.active { background: var(--card-alt); color: var(--text-strong); font-weight: 650; }
+.side-item.active .side-ico { color: var(--accent); }
+.side-ico { flex: none; width: 18px; text-align: center; font-size: 13px; color: var(--faint); }
+
+/* 하위 항목 — 상위가 활성일 때만 보인다. 늘 펼쳐 두면 사이드바가 다시 길어진다. */
+.side-sub { display: none; margin: 2px 0 6px; }
+.side-item.active + .side-sub, .side-sub:has(.side-subitem.active) { display: block; }
+.side-subitem {
+  display: block; width: 100%; padding: 6px 12px 6px 41px;
+  border: none; background: none; border-radius: var(--radius-md);
+  font-size: 12.5px; color: var(--muted); cursor: pointer; text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.side-subitem:hover { background: var(--card-alt); color: var(--text); }
+.side-subitem.active { color: var(--accent); font-weight: 650; }
+.side-gap { flex: 1 1 auto; min-height: 16px; }
+
+.side-collapse {
+  align-self: flex-end; margin-bottom: 8px; width: 26px; height: 26px;
+  border: 1px solid var(--border); background: var(--card); color: var(--muted);
+  border-radius: var(--radius-md); cursor: pointer; font-size: 12px; line-height: 1;
+}
+.side-collapse:hover { color: var(--text-strong); border-color: var(--accent); }
+
+/* 접힘 — 아이콘만 남긴다 */
+body.side-collapsed .app-side { width: 58px; padding-left: 8px; padding-right: 8px; }
+body.side-collapsed .side-txt,
+body.side-collapsed .side-sub { display: none; }
+body.side-collapsed .side-item { justify-content: center; padding-left: 8px; padding-right: 8px; }
+body.side-collapsed .side-ico { width: auto; font-size: 15px; }
+
+@media (max-width: 900px) {
+  .app-body { flex-direction: column; }
+  .app-side { position: static; width: 100%; min-height: 0; flex-direction: row;
+              flex-wrap: wrap; border-right: none; border-bottom: 1px solid var(--border); }
+  .app-side .side-item { width: auto; }
+  .side-sub, .side-collapse, .side-gap { display: none !important; }
+  .app-body > .container { padding-left: 20px; padding-right: 20px; }
+}

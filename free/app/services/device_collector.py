@@ -136,6 +136,53 @@ def _fqdn_map_from_monitor(payload) -> dict:
     return {k: sorted(v) for k, v in out.items() if v}
 
 
+# 후보 엔드포인트를 두드려 **응답 형태만** 확인하는 진단.
+#
+# ISDB·geography는 오프라인 config만으로 환원할 수 없어 도달불가 검사에서
+# 건너뛴다. REST로 가져올 수 있을 법하지만, v85에서 `dnsproxy 6` 출력 형식을
+# 추정해 파서를 만들었다가 첫 실사용에서 통째로 깨진 적이 있다. 그래서 이번엔
+# **실물 응답을 보기 전에는 파서를 만들지 않는다**. 이 함수는 어떤 경로가
+# 200을 주고 어떤 모양인지만 보고한다.
+_PROBE_PATHS = [
+    # ISDB (Internet Service Database)
+    "monitor/firewall/internet-service-match",
+    "monitor/firewall/internet-service-details",
+    "monitor/firewall/internet-service-basic",
+    "cmdb/firewall/internet-service",
+    "cmdb/firewall/internet-service-name",
+    # geography
+    "monitor/firewall/ipgeo",
+    "cmdb/firewall/address?filter=type==geography",
+    # 참고용 — 이미 쓰는 경로가 이 장비에서도 되는지 같이 본다
+    "monitor/firewall/address-fqdns",
+]
+
+
+def probe_endpoints(device: dict) -> list[dict]:
+    """후보 REST 경로를 순회하며 상태코드와 응답 앞부분을 돌려준다.
+
+    파싱하지 않는다 — 형태를 사람이 보고 판단하기 위한 것이다.
+    """
+    ip, port, token, verify = _device_conn(device)
+    out = []
+    for path in _PROBE_PATHS:
+        row = {"path": path}
+        try:
+            r = _get(ip, port, token, verify, path)
+            row["status"] = r.status_code
+            if r.status_code == 200:
+                body = r.text or ""
+                row["bytes"] = len(body)
+                row["sample"] = body[:900]
+            else:
+                row["sample"] = (r.text or "")[:200]
+        except Exception as exc:
+            row["status"] = None
+            row["error"] = f"{type(exc).__name__}: {exc}"[:200]
+        out.append(row)
+    return out
+
+
 def fetch_fqdn_map(device: dict) -> dict:
     """FQDN 해석만 조회한다 — config는 이미 있고 FQDN만 필요할 때.
 

@@ -57,17 +57,27 @@
   let done = loadDone();
 
   /* ── 화면 전환 (app.js의 하드코딩 setView를 대체) ─────────────── */
-  const VIEWS = ["overview", "analysis", "severity", "remediation", "diff", "settings"];
+  const VIEWS = ["overview", "analysis", "severity", "remediation",
+                 "diff", "evidence", "settings", "reference"];
   const SECTION = { overview: "overviewView", analysis: "analysisView",
                     severity: "severityView", remediation: "remediationView",
-                    diff: "diffView", settings: "settingsView" };
+                    diff: "diffView", evidence: "evidenceView",
+                    settings: "settingsView", reference: "referenceView" };
 
   function setView(mode) {
     if (VIEWS.indexOf(mode) < 0) mode = "overview";
     document.querySelectorAll(".page-view").forEach((v) => v.classList.add("hidden"));
     $(SECTION[mode])?.classList.remove("hidden");
-    document.querySelectorAll("[data-view]").forEach((b) =>
-      b.classList.toggle("active", b.getAttribute("data-view") === mode));
+    /* 하위 항목(data-fnd-goto가 있는 것)은 상위 항목과 같은 data-view를 갖는다.
+       그것까지 active로 칠하면 세 개가 동시에 켜지므로 상위만 칠한다. */
+    document.querySelectorAll("[data-view]").forEach((b) => {
+      if (b.hasAttribute("data-fnd-goto")) return;
+      b.classList.toggle("active", b.getAttribute("data-view") === mode);
+    });
+    // Findings를 떠나면 하위 항목 강조도 끈다
+    if (mode !== "severity") {
+      document.querySelectorAll(".side-subitem").forEach((b) => b.classList.remove("active"));
+    }
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   // 상단 nav 클릭은 app.js가 처리하고 window.APO.setView로 위임한다(리스너 중복 방지).
@@ -87,19 +97,23 @@
   }
   document.querySelectorAll("[data-goto]").forEach(wireGoto);
 
+  /* 사이드바 하위 항목은 data-view로 화면을 바꾸지만(app.js가 처리), 어느
+     패널을 열지는 아무도 안 정해 준다 — 눌러도 상위 화면만 뜨고 패널은 직전
+     상태 그대로다. 여기서 잇는다. */
+  document.querySelectorAll(".side-subitem[data-fnd-goto]").forEach((el) => {
+    el.addEventListener("click", () => setFnd(el.getAttribute("data-fnd-goto")));
+  });
+
   /* ── Findings 하위 탭 ─────────────────────────────────────────── */
   /* 어느 숫자를 눌러 Findings로 왔는지와 상관없이 하위 탭은 직전 상태를
      유지했다. Unreachable 지표를 눌렀는데 Policy findings 탭이 열려 있으면,
      방금 클릭한 그 수치가 보이지 않는 화면에 도착한다. */
   function setFnd(key) {
-    document.querySelectorAll(".fnd-tab").forEach((t) =>
-      t.classList.toggle("active", t.getAttribute("data-fnd") === key));
+    document.querySelectorAll(".side-subitem").forEach((t) =>
+      t.classList.toggle("active", t.getAttribute("data-fnd-goto") === key));
     document.querySelectorAll("[data-fnd-panel]").forEach((p) =>
       p.classList.toggle("hidden", p.getAttribute("data-fnd-panel") !== key));
   }
-  document.querySelectorAll(".fnd-tab").forEach((tab) => {
-    tab.addEventListener("click", () => setFnd(tab.getAttribute("data-fnd")));
-  });
 
   /* ── 상태 바 ─────────────────────────────────────────────────── */
   function chip(el, on, warn) {
@@ -434,6 +448,21 @@
   $("ovRunBtn")?.addEventListener("click", () => {
     setView("severity"); setFnd("policies"); $("sevClassifyBtn")?.click();
   });
+  /* 정책 표는 넓을수록 좋다. 접힘 상태는 기억한다 — 매번 다시 접게 하면
+     넓게 쓰려는 사람에게 계속 방해가 된다. */
+  const SIDE_KEY = "apo.sideCollapsed";
+  function applySide(collapsed) {
+    document.body.classList.toggle("side-collapsed", collapsed);
+    const b = $("sideCollapseBtn");
+    if (b) { b.textContent = collapsed ? "»" : "«"; b.title = collapsed ? "Expand menu" : "Collapse menu"; }
+  }
+  try { applySide(localStorage.getItem(SIDE_KEY) === "1"); } catch (_) {}
+  $("sideCollapseBtn")?.addEventListener("click", () => {
+    const next = !document.body.classList.contains("side-collapsed");
+    applySide(next);
+    try { localStorage.setItem(SIDE_KEY, next ? "1" : "0"); } catch (_) {}
+  });
+
   $("setLicenseBtn")?.addEventListener("click", () => $("licenseModal")?.classList.remove("hidden"));
   /* 시작 버튼 두 개가 같은 화면으로만 보내면 사실 같은 버튼이다. 장비 연결은
      접힌 아코디언을 펴 주고, 파일 가져오기는 파일 선택창을 바로 연다. */

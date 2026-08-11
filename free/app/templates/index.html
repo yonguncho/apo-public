@@ -42,16 +42,43 @@
     </div>
   </div>
 
-  <nav class="app-nav">
-    <div class="app-nav-inner">
-      <button type="button" class="view-switch-btn active" data-view="overview">Overview</button>
-      <button type="button" class="view-switch-btn" data-view="analysis">Sources</button>
-      <button type="button" class="view-switch-btn" data-view="severity">Findings</button>
-      <button type="button" class="view-switch-btn" data-view="remediation">Action Plan</button>
-      <button type="button" class="view-switch-btn" data-view="diff">Audit &amp; Evidence</button>
-      <button type="button" class="view-switch-btn" data-view="settings">Settings</button>
-    </div>
-  </nav>
+  <!-- 좌측 사이드바. 가로 탭 한 줄로는 하위 항목을 담을 곳이 없어 Findings 안에
+       또 탭을 두게 됐고(탭 2단), 그게 어수선함의 큰 축이었다. 사이드바는 하위
+       항목을 자연스럽게 품는다. 좁은 화면·표를 넓게 볼 때를 위해 접힌다. -->
+  <div class="app-body">
+    <nav class="app-side" id="appSide">
+      <button type="button" class="side-collapse" id="sideCollapseBtn"
+              title="Collapse menu" aria-label="Collapse menu">«</button>
+
+      <button type="button" class="side-item active" data-view="overview">
+        <span class="side-ico">◱</span><span class="side-txt" data-i18n>Overview</span></button>
+      <button type="button" class="side-item" data-view="analysis">
+        <span class="side-ico">↧</span><span class="side-txt" data-i18n>Sources</span></button>
+
+      <button type="button" class="side-item" data-view="severity">
+        <span class="side-ico">⚑</span><span class="side-txt" data-i18n>Findings</span></button>
+      <div class="side-sub" data-sub-of="severity">
+        <button type="button" class="side-subitem active" data-view="severity" data-fnd-goto="policies"
+                data-i18n>Policy findings</button>
+        <button type="button" class="side-subitem" data-view="severity" data-fnd-goto="unreachable"
+                data-i18n>Shadowed (unreachable)</button>
+        <button type="button" class="side-subitem" data-view="severity" data-fnd-goto="advisory"
+                data-i18n>FortiOS advisories</button>
+      </div>
+
+      <button type="button" class="side-item" data-view="remediation">
+        <span class="side-ico">✓</span><span class="side-txt" data-i18n>Action Plan</span></button>
+      <button type="button" class="side-item" data-view="diff">
+        <span class="side-ico">⇄</span><span class="side-txt" data-i18n>Change review</span></button>
+      <button type="button" class="side-item" data-view="evidence">
+        <span class="side-ico">▤</span><span class="side-txt" data-i18n>Evidence</span></button>
+
+      <div class="side-gap"></div>
+      <button type="button" class="side-item" data-view="settings">
+        <span class="side-ico">⚙</span><span class="side-txt" data-i18n>Settings</span></button>
+      <button type="button" class="side-item" data-view="reference">
+        <span class="side-ico">?</span><span class="side-txt" data-i18n>How it judges</span></button>
+    </nav>
 
   <main class="container">
 
@@ -63,8 +90,8 @@
            over-broad, or undocumented — with the evidence behind every call. Everything runs on this
            machine; nothing is uploaded anywhere.</p>
         <div class="ov-empty-actions">
-          <button type="button" id="ovStartCollect" class="primary-btn" data-goto="analysis">Connect a device</button>
-          <button type="button" id="ovStartUpload" class="secondary-btn" data-goto="analysis">Import a config file</button>
+          <button type="button" id="ovStartCollect" class="primary-btn" data-goto="analysis" data-i18n>Connect a device</button>
+          <button type="button" id="ovStartUpload" class="secondary-btn" data-goto="analysis" data-i18n>Import a config file</button>
         </div>
         <!-- 단계 수는 상단 상태바의 칩과 일치해야 한다. 사용자 IP 대역을 빼면
              칩은 다섯인데 안내는 셋이라, 준비가 덜 된 채로 결과를 보게 된다. -->
@@ -80,39 +107,39 @@
         <div class="ov-head">
           <div>
             <h1 id="ovTitle">Assessment overview</h1>
-            <p class="ov-sub" id="ovSubtitle"></p>
+            <p class="ov-sub" id="ovSubtitle" data-i18n></p>
           </div>
           <div class="ov-head-actions">
-            <button type="button" id="ovRunBtn" class="primary-btn">Run assessment</button>
-            <button type="button" class="secondary-btn" data-goto="remediation">Open action plan</button>
+            <button type="button" id="ovRunBtn" class="primary-btn" data-i18n>Run assessment</button>
+            <button type="button" class="secondary-btn" data-goto="remediation" data-i18n>Open action plan</button>
           </div>
         </div>
 
         <div class="metric-grid">
-          <div class="metric-card"><span class="metric-label">Policies</span><span class="metric-value" id="ovMetricPolicies">—</span><span class="metric-note" id="ovMetricPoliciesNote"></span></div>
-          <div class="metric-card is-action" data-goto="remediation"><span class="metric-label">Needs action</span><span class="metric-value" id="ovMetricAction">—</span><span class="metric-note">policies with a recommended change</span></div>
-          <div class="metric-card is-critical" data-goto="severity" data-fnd-goto="policies" data-sev="1"><span class="metric-label">Critical</span><span class="metric-value" id="ovMetricCritical">—</span><span class="metric-note">disable now — counted inside Needs action</span></div>
-          <div class="metric-card" data-goto="severity" data-fnd-goto="unreachable"><span class="metric-label">Shadowed</span><span class="metric-value" id="ovMetricUnreachable">—</span><span class="metric-note" id="ovMetricUnreachableNote">unreachable — never match traffic</span></div>
+          <div class="metric-card"><span class="metric-label" data-i18n>Policies</span><span class="metric-value" id="ovMetricPolicies">—</span><span class="metric-note" id="ovMetricPoliciesNote"></span></div>
+          <div class="metric-card is-action" data-goto="remediation"><span class="metric-label" data-i18n>Needs action</span><span class="metric-value" id="ovMetricAction">—</span><span class="metric-note">policies with a recommended change</span></div>
+          <div class="metric-card is-critical" data-goto="severity" data-fnd-goto="policies" data-sev="1"><span class="metric-label" data-i18n>Critical</span><span class="metric-value" id="ovMetricCritical">—</span><span class="metric-note">disable now — counted inside Needs action</span></div>
+          <div class="metric-card" data-goto="severity" data-fnd-goto="unreachable"><span class="metric-label" data-i18n>Shadowed</span><span class="metric-value" id="ovMetricUnreachable">—</span><span class="metric-note" id="ovMetricUnreachableNote">unreachable — never match traffic</span></div>
           <!-- 판정하지 못한 정책을 카드로 세워 두지 않으면, 옆의 "Needs action"이
                전체 작업량인 것처럼 읽힌다. 못 센 것도 결과의 일부다. -->
-          <div class="metric-card" data-goto="severity" data-fnd-goto="policies" data-sev="0"><span class="metric-label">Not judged</span><span class="metric-value" id="ovMetricUnknown">—</span><span class="metric-note" id="ovMetricUnknownNote">excluded from the counts above</span></div>
+          <div class="metric-card" data-goto="severity" data-fnd-goto="policies" data-sev="0"><span class="metric-label" data-i18n>Not judged</span><span class="metric-value" id="ovMetricUnknown">—</span><span class="metric-note" id="ovMetricUnknownNote">excluded from the counts above</span></div>
         </div>
 
         <div class="ov-grid">
           <article class="panel">
-            <div class="panel-head"><h2>Severity distribution</h2><span class="panel-hint">click a band to filter findings</span></div>
+            <div class="panel-head"><h2 data-i18n>Severity distribution</h2><span class="panel-hint" data-i18n>click a band to filter findings</span></div>
             <div id="ovSevBar" class="ov-sevbar"></div>
             <div id="ovSevLegend" class="ov-legend"></div>
           </article>
 
           <article class="panel">
-            <div class="panel-head"><h2>What to do</h2><span class="panel-hint">by action, in working order</span></div>
+            <div class="panel-head"><h2 data-i18n>What to do</h2><span class="panel-hint" data-i18n>by action, in working order</span></div>
             <div id="ovActions" class="ov-actions"></div>
           </article>
         </div>
 
         <article class="panel" id="ovGapPanel">
-          <div class="panel-head"><h2>Evidence coverage</h2><span class="panel-hint">what limits these results right now</span></div>
+          <div class="panel-head"><h2 data-i18n>Evidence coverage</h2><span class="panel-hint" data-i18n>what limits these results right now</span></div>
           <div id="ovGaps" class="ov-gaps"></div>
         </article>
       </div>
@@ -121,14 +148,14 @@
     <!-- ══ SOURCES ════════════════════════════════════════════════════ -->
     <section id="analysisView" class="page-view hidden">
       <div class="view-head">
-        <h1>Sources</h1>
-        <p>Bring in the configuration and the usage statistics the assessment runs on. Collect straight
+        <h1 data-i18n>Sources</h1>
+        <p data-i18n>Bring in the configuration and the usage statistics the assessment runs on. Collect straight
            from the device, or import files on an air-gapped network — the analysis is identical.</p>
       </div>
 
       <details id="collectDetails" class="glass-card" style="margin-bottom:16px;padding:16px 20px">
         <summary style="cursor:pointer;font-weight:600">Collect from device instead of uploading files (optional)</summary>
-        <p class="sev-guide-note" style="margin-top:10px">Connect to a FortiGate over its REST API and pull the configuration, hit-count / last-used stats, and FQDN resolutions in one step — no file exports needed. <strong>A read-only API token is enough</strong> (this only reads; it never changes the device). Prefer the file-upload path on air-gapped networks. The token is kept in memory only, never written to disk.</p>
+        <p class="sev-guide-note" style="margin-top:10px" data-i18n>Connect to a FortiGate over its REST API and pull the configuration, hit-count / last-used stats, and FQDN resolutions in one step — no file exports needed. <strong>A read-only API token is enough</strong> (this only reads; it never changes the device). Prefer the file-upload path on air-gapped networks. The token is kept in memory only, never written to disk.</p>
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
           <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">FortiGate IP / host
             <input type="text" id="collIp" class="sev-user-range-input" placeholder="10.0.0.1" /></label>
@@ -137,9 +164,14 @@
           <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">API token (read-only)
             <input type="password" id="collToken" class="sev-user-range-input" placeholder="REST API key" /></label>
           <label class="inline-status" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="collSkipSsl" /> Skip TLS verification (trusted network only)</label>
-          <button type="button" id="collectBtn" class="primary-btn">Collect from device</button>
+          <button type="button" id="collectBtn" class="primary-btn" data-i18n>Collect from device</button>
+          <!-- ISDB·geography는 아직 파서가 없다. 실물 응답을 보기 전에 형식을
+               추정해 만들면 첫 실사용에서 깨진다(v85에서 실제로 그랬다).
+               이 버튼은 어떤 경로가 무엇을 주는지만 확인한다. -->
+          <button type="button" id="probeBtn" class="secondary-btn" data-i18n>Check ISDB / geography support</button>
         </div>
         <div class="inline-status" id="collectStatus" style="margin-top:8px"></div>
+        <pre id="probeResult" class="ap-cli" style="display:none;margin-top:10px;max-height:280px;overflow:auto"></pre>
       </details>
 
       <div class="quick-upload analysis-upload upload-3col">
@@ -148,7 +180,7 @@
             <strong>Config File</strong>
             <span id="selectedConfigName" class="file-name">No file selected</span>
           </div>
-          <button type="button" id="configPickerBtn" class="primary-btn">Config File</button>
+          <button type="button" id="configPickerBtn" class="primary-btn" data-i18n>Config File</button>
           <input type="file" id="configFile" name="config_file" accept=".conf,.txt" hidden />
         </div>
         <div class="quick-upload-card">
@@ -156,7 +188,7 @@
             <strong>Firewall Policy CSV</strong>
             <span id="selectedFwCsvName" class="file-name">No file selected</span>
           </div>
-          <button type="button" id="fwCsvPickerBtn" class="secondary-btn">FW Policy CSV</button>
+          <button type="button" id="fwCsvPickerBtn" class="secondary-btn" data-i18n>FW Policy CSV</button>
           <input type="file" id="fwPolicyCsvFile" accept=".csv,.txt" hidden />
         </div>
         <div class="quick-upload-card">
@@ -164,7 +196,7 @@
             <strong>Proxy Policy CSV</strong>
             <span id="selectedProxyCsvName" class="file-name">No file selected</span>
           </div>
-          <button type="button" id="proxyCsvPickerBtn" class="secondary-btn">Proxy Policy CSV</button>
+          <button type="button" id="proxyCsvPickerBtn" class="secondary-btn" data-i18n>Proxy Policy CSV</button>
           <input type="file" id="proxyPolicyCsvFile" accept=".csv,.txt" hidden />
         </div>
       </div>
@@ -172,7 +204,7 @@
       <section class="summary-grid">
         <article class="glass-card">
           <div class="section-heading">
-            <div><span class="section-index">01</span><h2>Config Summary</h2></div>
+            <div><span class="section-index" data-i18n>01</span><h2 data-i18n>Config Summary</h2></div>
             <span id="configStatus" class="inline-status">Load a FortiGate config file.</span>
           </div>
           <div id="metaBox" class="summary-stats"></div>
@@ -180,7 +212,7 @@
         </article>
         <article class="glass-card">
           <div class="section-heading">
-            <div><span class="section-index">02</span><h2>Policy CSV Summary</h2></div>
+            <div><span class="section-index" data-i18n>02</span><h2 data-i18n>Policy CSV Summary</h2></div>
             <span id="policyStatsStatus" class="inline-status">Import GUI policy CSV to merge Last Used, Hit Count, and Status.</span>
           </div>
           <div id="policyCsvSummary" class="summary-stats summary-stats-compact"></div>
@@ -191,8 +223,8 @@
         <div class="workspace-topbar">
           <div class="search-wrap"><input type="search" id="tableFilter" placeholder="Search within the current tab..." /></div>
           <div class="toolbar-actions">
-            <button type="button" id="downloadCsvBtn" class="secondary-btn">Download Current Tab CSV</button>
-            <button type="button" id="downloadWorkbookBtn" class="secondary-btn secondary-btn-soft">Download All Tabs Excel</button>
+            <button type="button" id="downloadCsvBtn" class="secondary-btn" data-i18n>Download Current Tab CSV</button>
+            <button type="button" id="downloadWorkbookBtn" class="secondary-btn secondary-btn-soft" data-i18n>Download All Tabs Excel</button>
             <span id="tabCount" class="inline-status"></span>
           </div>
         </div>
@@ -205,16 +237,16 @@
           <label class="filter-pill filter-pill-accent"><input type="checkbox" id="filterDeletable" /> Removal candidate</label>
         </div>
         <div class="tabs">
-          <button class="tab-btn active" data-tab="firewall_policy">Firewall Policy</button>
-          <button class="tab-btn" data-tab="firewall_proxy_policy">Firewall Proxy Policy</button>
-          <button class="tab-btn" data-tab="firewall_multicast_policy">Multicast Policy</button>
-          <button class="tab-btn" data-tab="firewall_address">Firewall Address</button>
-          <button class="tab-btn" data-tab="firewall_addrgrp">Firewall AddrGrp</button>
-          <button class="tab-btn" data-tab="firewall_proxy_address">Proxy Address</button>
-          <button class="tab-btn" data-tab="firewall_proxy_addrgrp">Proxy AddrGrp</button>
-          <button class="tab-btn" data-tab="firewall_service_custom">Service Custom</button>
-          <button class="tab-btn" data-tab="firewall_service_group">Service Group</button>
-          <button class="tab-btn" data-tab="system_interface">Interface</button>
+          <button class="tab-btn active" data-tab="firewall_policy" data-i18n>Firewall Policy</button>
+          <button class="tab-btn" data-tab="firewall_proxy_policy" data-i18n>Firewall Proxy Policy</button>
+          <button class="tab-btn" data-tab="firewall_multicast_policy" data-i18n>Multicast Policy</button>
+          <button class="tab-btn" data-tab="firewall_address" data-i18n>Firewall Address</button>
+          <button class="tab-btn" data-tab="firewall_addrgrp" data-i18n>Firewall AddrGrp</button>
+          <button class="tab-btn" data-tab="firewall_proxy_address" data-i18n>Proxy Address</button>
+          <button class="tab-btn" data-tab="firewall_proxy_addrgrp" data-i18n>Proxy AddrGrp</button>
+          <button class="tab-btn" data-tab="firewall_service_custom" data-i18n>Service Custom</button>
+          <button class="tab-btn" data-tab="firewall_service_group" data-i18n>Service Group</button>
+          <button class="tab-btn" data-tab="system_interface" data-i18n>Interface</button>
         </div>
         <div id="tabContent"></div>
       </section>
@@ -223,46 +255,40 @@
     <!-- ══ FINDINGS ═══════════════════════════════════════════════════ -->
     <section id="severityView" class="page-view hidden">
       <div class="view-head">
-        <h1>Findings</h1>
-        <p>Every policy carries a severity and a recommended action, with the reason it was judged that
+        <h1 data-i18n>Findings</h1>
+        <p data-i18n>Every policy carries a severity and a recommended action, with the reason it was judged that
            way. Nothing here is inferred silently — where data is missing, the finding says so.</p>
       </div>
 
       <article class="glass-card" style="margin-bottom:20px;padding:20px">
         <div class="section-heading">
-          <div><span class="section-index">Setup</span><h2>User IP ranges</h2></div>
+          <div><span class="section-index" data-i18n>Setup</span><h2 data-i18n>User IP ranges</h2></div>
           <span class="inline-status">Severity 1/2/7 can be assessed without IP ranges. Adding ranges enables full classification.</span>
         </div>
         <div class="sev-user-range-row">
           <input type="text" id="sevRangeInput" class="sev-user-range-input" placeholder="CIDR (e.g. 10.99.240.0/21)" />
-          <button type="button" id="sevRangeAddBtn" class="secondary-btn">Add</button>
-          <button type="button" id="sevRangeImportBtn" class="secondary-btn">Import from File</button>
+          <button type="button" id="sevRangeAddBtn" class="secondary-btn" data-i18n>Add</button>
+          <button type="button" id="sevRangeImportBtn" class="secondary-btn" data-i18n>Import from File</button>
           <input type="file" id="sevRangeImportFile" accept=".txt,.csv" hidden />
-          <button type="button" id="sevClassifyBtn" class="primary-btn">Classify</button>
+          <button type="button" id="sevClassifyBtn" class="primary-btn" data-i18n>Classify</button>
         </div>
         <div id="sevRangeTags" class="sev-user-range-tags"></div>
         <div class="inline-status" id="sevClassifyStatus">Please load a Config file first.</div>
       </article>
 
-      <div class="fnd-tabs">
-        <button type="button" class="fnd-tab active" data-fnd="policies">Policy findings</button>
-        <button type="button" class="fnd-tab" data-fnd="unreachable">Shadowed (unreachable)</button>
-        <button type="button" class="fnd-tab" data-fnd="advisory">FortiOS advisories</button>
-      </div>
-
       <div class="fnd-panel" data-fnd-panel="policies">
       <article class="glass-card" id="sevPhase2Card" style="margin-bottom:20px;padding:20px;display:none">
         <div class="section-heading">
-          <div><span class="section-index">Results</span><h2>Severity Classification Results</h2></div>
-          <button type="button" id="sevExportBtn" class="secondary-btn">Export to Excel</button>
+          <div><span class="section-index" data-i18n>Results</span><h2 data-i18n>Severity Classification Results</h2></div>
+          <button type="button" id="sevExportBtn" class="secondary-btn" data-i18n>Export to Excel</button>
         </div>
         <div id="sevSummaryBar" class="sev-summary-bar"></div>
       </article>
 
       <article class="glass-card" id="sevTableCard" style="padding:20px;display:none">
         <div class="sev-subtabs">
-          <button class="sev-subtab-btn active" data-sev-tab="firewall">Firewall Policy</button>
-          <button class="sev-subtab-btn" data-sev-tab="proxy">Proxy Policy</button>
+          <button class="sev-subtab-btn active" data-sev-tab="firewall" data-i18n>Firewall Policy</button>
+          <button class="sev-subtab-btn" data-sev-tab="proxy" data-i18n>Proxy Policy</button>
         </div>
         <div id="sevTableContent" class="sev-table-wrap"></div>
       </article>
@@ -271,13 +297,13 @@
       <div class="fnd-panel hidden" data-fnd-panel="unreachable">
       <article class="glass-card" id="sevReachCard" style="margin-bottom:20px;padding:20px;display:none">
         <div class="section-heading">
-          <div><span class="section-index">Unreachable</span><h2>Unreachable Policy Detection</h2></div>
+          <div><span class="section-index" data-i18n>Unreachable</span><h2 data-i18n>Unreachable Policy Detection</h2></div>
           <span class="inline-status" id="sevReachCoverage"></span>
         </div>
-        <p class="sev-guide-note" style="margin-top:0">A policy is listed here only when a single always-on policy above it <strong>provably matches every packet</strong> it could match (source, destination, service, and interfaces all contained) — so it never takes effect. Conservative static analysis: policies using geography / ISDB / user objects or negation are skipped, not guessed. Routing and NAT are not considered.</p>
+        <p class="sev-guide-note" style="margin-top:0" data-i18n>A policy is listed here only when a single always-on policy above it <strong>provably matches every packet</strong> it could match (source, destination, service, and interfaces all contained) — so it never takes effect. Conservative static analysis: policies using geography / ISDB / user objects or negation are skipped, not guessed. Routing and NAT are not considered.</p>
         <div class="sev-user-range-row" style="flex-wrap:wrap;align-items:center">
           <button type="button" id="fqdnFetchBtn" class="primary-btn">Include FQDN policies — fetch from connected device</button>
-          <button type="button" id="fqdnDumpBtn" class="secondary-btn">or upload DNS cache dump</button>
+          <button type="button" id="fqdnDumpBtn" class="secondary-btn" data-i18n>or upload DNS cache dump</button>
           <input type="file" id="fqdnDumpFile" accept=".txt,.log" hidden />
           <span id="fqdnDumpStatus" class="inline-status">If you collected from the device, FQDN resolutions are already included. Otherwise fetch them from a connected device, or upload the output of <code>diagnose test application dnsproxy 6</code>. Either way the results are re-classified automatically and marked "DNS capture" (provable as of capture time).</span>
         </div>
@@ -288,8 +314,8 @@
       <div class="fnd-panel hidden" data-fnd-panel="advisory" id="advisorView">
       <article class="glass-card" style="margin-bottom:20px;padding:20px">
         <div class="section-heading">
-          <div><span class="section-index">Detection</span><h2>Version Detection</h2></div>
-          <button type="button" id="advisorRunBtn" class="primary-btn">Analyze</button>
+          <div><span class="section-index" data-i18n>Detection</span><h2 data-i18n>Version Detection</h2></div>
+          <button type="button" id="advisorRunBtn" class="primary-btn" data-i18n>Analyze</button>
         </div>
         <div id="advisorVersionBox" class="summary-stats" style="min-height:40px"></div>
         <div id="advisorStatus" class="inline-status" style="margin-top:8px">Load a Config File and click Analyze.</div>
@@ -332,20 +358,20 @@
     <!-- ══ ACTION PLAN ════════════════════════════════════════════════ -->
     <section id="remediationView" class="page-view hidden">
       <div class="view-head">
-        <h1>Action plan</h1>
-        <p>The same findings, ordered as work: what to do first, the exact command for each change, and
+        <h1 data-i18n>Action plan</h1>
+        <p data-i18n>The same findings, ordered as work: what to do first, the exact command for each change, and
            somewhere to record who did it. Disabling is reversible — deletion is not.</p>
       </div>
 
       <article class="panel" id="apPanel">
         <div class="panel-head">
-          <h2>Prioritised work list</h2>
+          <h2 data-i18n>Prioritised work list</h2>
           <div class="panel-actions">
             <span class="panel-hint" id="apProgress"></span>
-            <button type="button" id="apResetBtn" class="secondary-btn">Clear checkmarks</button>
+            <button type="button" id="apResetBtn" class="secondary-btn" data-i18n>Clear checkmarks</button>
           </div>
         </div>
-        <div id="apEmpty" class="empty-state"><strong>No assessment yet.</strong><span>Run the assessment on the Findings page to build a work list.</span></div>
+        <div id="apEmpty" class="empty-state"><strong data-i18n>No assessment yet.</strong><span data-i18n>Run the assessment on the Findings page to build a work list.</span></div>
         <!-- 엑셀 Action Plan 시트에는 이 경고가 있는데 화면 복사 버튼에는 없었다.
              VDOM을 먼저 지정하지 않으면 붙여넣은 명령이 다른 VDOM에 들어간다. -->
         <p id="apCliNote" class="sev-guide-note" style="margin:0 20px 4px">On multi-VDOM devices, enter the policy's VDOM first (<code>config vdom</code> / <code>edit &lt;name&gt;</code>) before running these commands. Review each change with the policy owner — disabling is reversible, deletion is not.</p>
@@ -353,11 +379,11 @@
       </article>
 
       <details class="panel panel-collapsible">
-        <summary><h2>Apply changes over the API</h2><span class="panel-hint">optional — disables policies directly on the device</span></summary>
+        <summary><h2 data-i18n>Apply changes over the API</h2><span class="panel-hint" data-i18n>optional — disables policies directly on the device</span></summary>
         <div class="panel-body">
       <article class="glass-card" id="remDeviceCard" style="margin-bottom:20px;padding:24px">
         <div class="section-heading">
-          <div><span class="section-index">Device</span><h2>Connect the FortiGate</h2></div>
+          <div><span class="section-index" data-i18n>Device</span><h2 data-i18n>Connect the FortiGate</h2></div>
           <span id="remDeviceStatus" class="inline-status"></span>
         </div>
         <div class="rem-device-form">
@@ -367,20 +393,20 @@
           <label class="rem-label">API Token<input id="remToken" type="password" class="rem-input rem-input-lg" placeholder="API access token"></label>
           <label class="rem-label rem-label-check" title="Only enable this for a device with a self-signed certificate. While enabled, the API token is sent over a connection that is not authenticated."><input id="remSkipSsl" type="checkbox"> Skip SSL Verify <span class="rem-warn">(insecure)</span></label>
           <div class="rem-device-actions">
-            <button id="remSaveBtn" class="primary-btn">Save Device</button>
-            <button id="remTestBtn" class="secondary-btn">Test Connection</button>
+            <button id="remSaveBtn" class="primary-btn" data-i18n>Save Device</button>
+            <button id="remTestBtn" class="secondary-btn" data-i18n>Test Connection</button>
           </div>
         </div>
       </article>
 
       <article class="glass-card" style="margin-bottom:20px;padding:24px">
         <div class="section-heading">
-          <div><span class="section-index">Select</span><h2>Choose policies to disable</h2></div>
+          <div><span class="section-index" data-i18n>Select</span><h2 data-i18n>Choose policies to disable</h2></div>
           <div class="rem-toolbar-right">
-            <button id="remLoadBtn" class="primary-btn">Load Candidates</button>
-            <button id="remExportCsvBtn" class="secondary-btn">Export CSV</button>
-            <button id="remExportJsonBtn" class="secondary-btn">Export JSON</button>
-            <button id="remApplyBtn" class="rem-btn-danger" disabled>Apply Disable to Selected</button>
+            <button id="remLoadBtn" class="primary-btn" data-i18n>Load Candidates</button>
+            <button id="remExportCsvBtn" class="secondary-btn" data-i18n>Export CSV</button>
+            <button id="remExportJsonBtn" class="secondary-btn" data-i18n>Export JSON</button>
+            <button id="remApplyBtn" class="rem-btn-danger" disabled data-i18n>Apply Disable to Selected</button>
           </div>
         </div>
         <p id="remLoadStatus" class="inline-status" style="display:block;margin-bottom:16px;text-align:left"></p>
@@ -450,7 +476,7 @@
 
       <article class="glass-card hidden" id="remResultCard" style="padding:24px;margin-bottom:20px">
         <div class="section-heading">
-          <div><span class="section-index">Results</span><h2>Apply Results</h2></div>
+          <div><span class="section-index" data-i18n>Results</span><h2 data-i18n>Apply Results</h2></div>
         </div>
         <div id="remResultBody"></div>
       </article>
@@ -462,8 +488,8 @@
           <h3 class="rem-modal-title">Confirm Policy Disable</h3>
           <p id="remModalMsg" class="rem-modal-msg"></p>
           <div class="rem-modal-actions">
-            <button id="remModalCancel" class="secondary-btn">Cancel</button>
-            <button id="remModalConfirm" class="rem-btn-danger">Apply</button>
+            <button id="remModalCancel" class="secondary-btn" data-i18n>Cancel</button>
+            <button id="remModalConfirm" class="rem-btn-danger" data-i18n>Apply</button>
           </div>
         </div>
       </div>
@@ -472,14 +498,14 @@
     <!-- ══ AUDIT & EVIDENCE ═══════════════════════════════════════════ -->
     <section id="diffView" class="page-view hidden">
       <div class="view-head">
-        <h1>Audit &amp; evidence</h1>
-        <p>What changed between configurations, the evidence record for a periodic review, and a way to
+        <h1 data-i18n>Audit &amp; evidence</h1>
+        <p data-i18n>What changed between configurations, the evidence record for a periodic review, and a way to
            measure how accurate these judgements actually are on your firewall.</p>
       </div>
 
       <article class="glass-card diff-card">
         <div class="section-heading">
-          <div><span class="section-index">Configuration Drift Analysis</span><h2>Configuration Change Review</h2></div>
+          <div><span class="section-index" data-i18n>Configuration Drift Analysis</span><h2 data-i18n>Configuration Change Review</h2></div>
           <span id="diffStatus" class="inline-status">Upload two FortiGate config backups to compare configuration changes.</span>
         </div>
 
@@ -494,15 +520,15 @@
         <div class="diff-upload-grid">
           <div class="diff-upload-tile">
             <div><strong>Baseline Configuration</strong><span id="selectedOldConfigName" class="file-name dark-file-name">No file selected</span></div>
-            <button type="button" id="oldConfigPickerBtn" class="secondary-btn">Choose Baseline</button>
+            <button type="button" id="oldConfigPickerBtn" class="secondary-btn" data-i18n>Choose Baseline</button>
             <input type="file" id="oldConfigFile" accept=".conf,.txt" hidden />
           </div>
           <div class="diff-upload-tile">
             <div><strong>Target Configuration</strong><span id="selectedNewConfigName" class="file-name dark-file-name">No file selected</span></div>
-            <button type="button" id="newConfigPickerBtn" class="secondary-btn">Choose Target</button>
+            <button type="button" id="newConfigPickerBtn" class="secondary-btn" data-i18n>Choose Target</button>
             <input type="file" id="newConfigFile" accept=".conf,.txt" hidden />
           </div>
-          <div class="diff-upload-actions"><button type="button" id="runDiffBtn" class="primary-btn">Analyze Configuration Changes</button></div>
+          <div class="diff-upload-actions"><button type="button" id="runDiffBtn" class="primary-btn" data-i18n>Analyze Configuration Changes</button></div>
         </div>
 
         <div id="diffProgress" class="diff-progress hidden">
@@ -519,33 +545,44 @@
         <div class="diff-result-layout">
           <aside class="diff-category-panel">
             <div class="diff-category-title">Change Categories</div>
-            <button class="diff-category-btn active" data-diff-tab="overview">Overview</button>
-            <button class="diff-category-btn" data-diff-tab="added_policies">Added Policies</button>
-            <button class="diff-category-btn" data-diff-tab="removed_policies">Removed Policies</button>
-            <button class="diff-category-btn" data-diff-tab="changed_policies">Changed Policies</button>
-            <button class="diff-category-btn" data-diff-tab="added_objects">Added Objects</button>
-            <button class="diff-category-btn" data-diff-tab="removed_objects">Removed Objects</button>
-            <button class="diff-category-btn" data-diff-tab="other_changes">Other Configuration Changes</button>
+            <button class="diff-category-btn active" data-diff-tab="overview" data-i18n>Overview</button>
+            <button class="diff-category-btn" data-diff-tab="added_policies" data-i18n>Added Policies</button>
+            <button class="diff-category-btn" data-diff-tab="removed_policies" data-i18n>Removed Policies</button>
+            <button class="diff-category-btn" data-diff-tab="changed_policies" data-i18n>Changed Policies</button>
+            <button class="diff-category-btn" data-diff-tab="added_objects" data-i18n>Added Objects</button>
+            <button class="diff-category-btn" data-diff-tab="removed_objects" data-i18n>Removed Objects</button>
+            <button class="diff-category-btn" data-diff-tab="other_changes" data-i18n>Other Configuration Changes</button>
           </aside>
           <div class="diff-result-panel">
             <div id="diffSummary" class="summary-stats diff-summary-grid"></div>
-            <div id="diffTabContent"><div class="empty-state"><strong>No comparison result yet.</strong><span>Select two configuration files and run the analysis.</span></div></div>
+            <div id="diffTabContent"><div class="empty-state"><strong>No comparison result yet.</strong><span data-i18n>Select two configuration files and run the analysis.</span></div></div>
           </div>
         </div>
       </article>
 
+    </section>
+
+
+    <!-- ══ EVIDENCE ═══════════════════════════════════════════════════ -->
+    <section id="evidenceView" class="page-view hidden">
+      <div class="view-head">
+        <h1 data-i18n>Evidence</h1>
+        <p data-i18n>The record a reviewer or auditor asks for: what was reviewed and when, and a way to
+           measure how accurate these judgements actually are on your firewall.</p>
+      </div>
+
       <article class="glass-card diff-card" style="margin-top:20px">
         <div class="section-heading">
-          <div><span class="section-index">Audit Trail</span><h2>Ruleset Review Evidence</h2></div>
+          <div><span class="section-index" data-i18n>Audit Trail</span><h2 data-i18n>Ruleset Review Evidence</h2></div>
           <span class="inline-status">PCI-DSS v4.0 Req 1.2.7 — review NSC configurations at least every six months</span>
         </div>
-        <p class="sev-guide-note" style="margin-top:0">Upload two or more config snapshots (<strong>oldest first</strong> — FortiGate configs carry no backup timestamp, so the order you provide is the order recorded). APO builds a change timeline between snapshots and exports a <strong>Review Evidence</strong> workbook: each snapshot's SHA-256, changes per interval, the PCI-DSS citation, and a reviewer sign-off block. Collect snapshots with whatever you already use — Oxidized, FortiManager revisions, manual backups.</p>
+        <p class="sev-guide-note" style="margin-top:0" data-i18n>Upload two or more config snapshots (<strong>oldest first</strong> — FortiGate configs carry no backup timestamp, so the order you provide is the order recorded). APO builds a change timeline between snapshots and exports a <strong>Review Evidence</strong> workbook: each snapshot's SHA-256, changes per interval, the PCI-DSS citation, and a reviewer sign-off block. Collect snapshots with whatever you already use — Oxidized, FortiManager revisions, manual backups.</p>
         <div class="sev-user-range-row" style="flex-wrap:wrap">
-          <button type="button" id="auditPickBtn" class="secondary-btn">Select snapshots (oldest first)</button>
+          <button type="button" id="auditPickBtn" class="secondary-btn" data-i18n>Select snapshots (oldest first)</button>
           <input type="file" id="auditFiles" accept=".conf,.txt" multiple hidden />
           <span id="auditFileNames" class="inline-status">No snapshots selected</span>
-          <button type="button" id="auditRunBtn" class="primary-btn">Build timeline</button>
-          <button type="button" id="auditExportBtn" class="secondary-btn" style="display:none">Export Review Evidence (.xlsx)</button>
+          <button type="button" id="auditRunBtn" class="primary-btn" data-i18n>Build timeline</button>
+          <button type="button" id="auditExportBtn" class="secondary-btn" style="display:none" data-i18n>Export Review Evidence (.xlsx)</button>
         </div>
         <div class="inline-status" id="auditStatus"></div>
         <div id="auditResult" class="sev-table-wrap" style="margin-top:12px"></div>
@@ -553,14 +590,14 @@
 
       <article class="glass-card" id="sevVerifyCard" style="margin-bottom:20px;padding:20px;display:none">
         <div class="section-heading">
-          <div><span class="section-index">Verify</span><h2>Accuracy Verification</h2></div>
+          <div><span class="section-index" data-i18n>Verify</span><h2 data-i18n>Accuracy Verification</h2></div>
           <span class="inline-status">Free — verify APO's calls against your firewall before you trust them</span>
         </div>
-        <p class="sev-guide-note" style="margin-top:0">Don't take this report on faith. APO draws a stratified sample across severity levels (up to ~31 policies), each with <strong>what to check</strong> and the <strong>exact CLI commands</strong> to run on your FortiGate. Fill in what you actually found and whether the call matched, then upload the sheet back — APO computes per-level precision. Held or unfilled rows are excluded from the denominator, never counted as right or wrong.</p>
+        <p class="sev-guide-note" style="margin-top:0" data-i18n>Don't take this report on faith. APO draws a stratified sample across severity levels (up to ~31 policies), each with <strong>what to check</strong> and the <strong>exact CLI commands</strong> to run on your FortiGate. Fill in what you actually found and whether the call matched, then upload the sheet back — APO computes per-level precision. Held or unfilled rows are excluded from the denominator, never counted as right or wrong.</p>
         <div class="sev-user-range-row" style="flex-wrap:wrap">
-          <button type="button" id="verifySampleXlsxBtn" class="secondary-btn">Download sample worksheet (.xlsx)</button>
-          <button type="button" id="verifySampleCsvBtn" class="secondary-btn">.csv</button>
-          <button type="button" id="verifyUploadBtn" class="primary-btn">Upload completed worksheet</button>
+          <button type="button" id="verifySampleXlsxBtn" class="secondary-btn" data-i18n>Download sample worksheet (.xlsx)</button>
+          <button type="button" id="verifySampleCsvBtn" class="secondary-btn" data-i18n>.csv</button>
+          <button type="button" id="verifyUploadBtn" class="primary-btn" data-i18n>Upload completed worksheet</button>
           <input type="file" id="verifyUploadFile" accept=".csv,.xlsx" hidden />
         </div>
         <div class="inline-status" id="verifyStatus"></div>
@@ -571,24 +608,24 @@
     <!-- ══ SETTINGS ═══════════════════════════════════════════════════ -->
     <section id="settingsView" class="page-view hidden">
       <div class="view-head">
-        <h1>Settings</h1>
-        <p>The criteria the assessment applies. No public standard fixes these numbers — they are your
+        <h1 data-i18n>Settings</h1>
+        <p data-i18n>The criteria the assessment applies. No public standard fixes these numbers — they are your
            organisation's audit criteria, and the report records whichever values were used.</p>
       </div>
 
       <article class="glass-card" style="margin-bottom:20px;padding:20px">
         <div class="section-heading">
-          <div><span class="section-index">Settings</span><h2>Assessment Thresholds</h2></div>
-          <button type="button" id="sevThresholdToggle" class="secondary-btn">Show</button>
+          <div><span class="section-index" data-i18n>Settings</span><h2 data-i18n>Assessment Thresholds</h2></div>
+          <button type="button" id="sevThresholdToggle" class="secondary-btn" data-i18n>Show</button>
         </div>
         <div id="sevThresholdPanel" style="display:none">
-          <p class="sev-guide-note" style="margin-top:0"><strong>Not sure what to set? Leave the defaults.</strong> They are sensible for most environments (365 days keeps once-a-year jobs like year-end batches from being flagged). These numbers exist as settings because no public standard defines them — they are your organization's audit criteria, not the tool's. Pick a preset or adjust individual values; changes apply the next time you click Classify. Active profile: <span id="sevProfileName">default</span>.</p>
+          <p class="sev-guide-note" style="margin-top:0" data-i18n><strong>Not sure what to set? Leave the defaults.</strong> They are sensible for most environments (365 days keeps once-a-year jobs like year-end batches from being flagged). These numbers exist as settings because no public standard defines them — they are your organization's audit criteria, not the tool's. Pick a preset or adjust individual values; changes apply the next time you click Classify. Active profile: <span id="sevProfileName">default</span>.</p>
           <div class="sev-user-range-row" style="flex-wrap:wrap;margin-bottom:10px">
             <span class="inline-status">Presets:</span>
-            <button type="button" class="secondary-btn th-preset" data-dorm="365" data-long="730">Standard — flag after 1 year unused</button>
-            <button type="button" class="secondary-btn th-preset" data-dorm="180" data-long="365">Strict — flag after 6 months</button>
-            <button type="button" class="secondary-btn th-preset" data-dorm="730" data-long="1460">Relaxed — flag after 2 years</button>
-            <button type="button" id="thResetBtn" class="secondary-btn">Reset to profile defaults</button>
+            <button type="button" class="secondary-btn th-preset" data-dorm="365" data-long="730" data-i18n>Standard — flag after 1 year unused</button>
+            <button type="button" class="secondary-btn th-preset" data-dorm="180" data-long="365" data-i18n>Strict — flag after 6 months</button>
+            <button type="button" class="secondary-btn th-preset" data-dorm="730" data-long="1460" data-i18n>Relaxed — flag after 2 years</button>
+            <button type="button" id="thResetBtn" class="secondary-btn" data-i18n>Reset to profile defaults</button>
           </div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 20px">
             <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Dormancy period (days)
@@ -621,13 +658,13 @@
             </label>
           </div>
           <div id="brandingPanel" style="display:none;margin-top:16px;padding-top:12px;border-top:1px solid #e2e8f0">
-            <p class="sev-guide-note" style="margin-top:0"><strong>Report branding</strong> (MSP / Consultant license) — exported reports carry your company name on the Summary page.</p>
+            <p class="sev-guide-note" style="margin-top:0" data-i18n><strong>Report branding</strong> (MSP / Consultant license) — exported reports carry your company name on the Summary page.</p>
             <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
               <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Prepared by (your company)
                 <input type="text" id="brandCompany" class="sev-user-range-input" maxlength="80" placeholder="e.g. Acme Security Consulting" /></label>
               <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Prepared for (client, optional)
                 <input type="text" id="brandFor" class="sev-user-range-input" maxlength="80" placeholder="e.g. Contoso Manufacturing" /></label>
-              <button type="button" id="brandSaveBtn" class="secondary-btn">Save branding</button>
+              <button type="button" id="brandSaveBtn" class="secondary-btn" data-i18n>Save branding</button>
               <span id="brandStatus" class="inline-status"></span>
             </div>
           </div>
@@ -635,20 +672,48 @@
       </article>
 
       <article class="panel">
-        <div class="panel-head"><h2>License</h2><span class="panel-hint" id="setLicenseHint"></span></div>
+        <div class="panel-head"><h2 data-i18n>Language</h2><span class="panel-hint" data-i18n>menus and descriptions only</span></div>
         <div class="panel-body">
-          <p class="sev-guide-note" style="margin-top:0">Analysis, severity classification, unreachable detection, change review and accuracy verification are free. Exporting reports needs a one-time licence.</p>
+          <!-- 판정 사유·조치 라벨·표 내용은 영어로 둔다. 그 값들은 엔진이 만들어
+               엑셀 산출물에도 그대로 실리므로, 화면만 번역하면 같은 판정이 두
+               곳에서 다른 말로 나온다. -->
           <div class="sev-user-range-row">
-            <span class="inline-status" id="setLicenseState">Checking…</span>
-            <button type="button" id="setLicenseBtn" class="secondary-btn">Enter a licence key</button>
-            <button type="button" id="setSampleBtn" class="secondary-btn">See a sample report</button>
+            <label class="inline-status" for="setLangSelect" data-i18n>Interface language</label>
+            <select id="setLangSelect" class="sev-user-range-input" style="max-width:220px">
+              <option value="en">English</option>
+              <option value="ko">한국어</option>
+            </select>
           </div>
         </div>
       </article>
 
+      <article class="panel">
+        <div class="panel-head"><h2 data-i18n>License</h2><span class="panel-hint" id="setLicenseHint"></span></div>
+        <div class="panel-body">
+          <p class="sev-guide-note" style="margin-top:0" data-i18n>Analysis, severity classification, unreachable detection, change review and accuracy verification are free. Exporting reports needs a one-time licence.</p>
+          <div class="sev-user-range-row">
+            <span class="inline-status" id="setLicenseState">Checking…</span>
+            <button type="button" id="setLicenseBtn" class="secondary-btn" data-i18n>Enter a licence key</button>
+            <button type="button" id="setSampleBtn" class="secondary-btn" data-i18n>See a sample report</button>
+          </div>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- ══ REFERENCE ══════════════════════════════════════════════════ -->
+    <!-- 설정이 아니라 문서다. Settings에 두면 그 화면이 가장 큰 화면이 되고,
+         정작 바꿀 수 있는 항목(임계값·라이선스·언어)이 묻힌다. -->
+    <section id="referenceView" class="page-view hidden">
+      <div class="view-head">
+        <h1 data-i18n>How policies are judged</h1>
+        <p data-i18n>The criteria behind every severity and action in this tool. Nothing here is
+           configurable — adjust the numbers under Settings.</p>
+      </div>
+
       <article class="glass-card" style="margin-bottom:20px;padding:20px">
         <div class="section-heading">
-          <div><span class="section-index">Guide</span><h2>Severity Classification Criteria</h2></div>
+          <div><span class="section-index" data-i18n>Guide</span><h2 data-i18n>Severity Classification Criteria</h2></div>
         </div>
         <div style="overflow:auto">
           <table class="severity-guide-table">
@@ -707,12 +772,14 @@
               </tr>
             </tbody>
           </table>
-          <p class="sev-guide-note">※ Without User IP ranges configured, traffic type (Server/User) cannot be determined — <strong>Severity 1, 2, and 7 can still be assessed without IP ranges</strong></p>
-          <p class="sev-guide-note">※ The periods in this table ("1 year", "2 years") describe the <strong>default thresholds</strong> (365 / 730 days). If you change them in Assessment Thresholds above, classification uses your values and each policy's Reason column shows the actual threshold applied.</p>
+          <p class="sev-guide-note" data-i18n>※ Without User IP ranges configured, traffic type (Server/User) cannot be determined — <strong>Severity 1, 2, and 7 can still be assessed without IP ranges</strong></p>
+          <p class="sev-guide-note" data-i18n>※ The periods in this table ("1 year", "2 years") describe the <strong>default thresholds</strong> (365 / 730 days). If you change them in Assessment Thresholds above, classification uses your values and each policy's Reason column shows the actual threshold applied.</p>
         </div>
       </article>
     </section>
+
   </main>
+  </div>
 
   <footer class="footer-signature">
     <div class="footer-product">AI-Policy Optimizer <span class="apo-mark-dark">(APO)</span></div>
@@ -723,15 +790,15 @@
   <div id="licenseModal" class="lic-overlay hidden">
     <div class="lic-modal">
       <div class="lic-header">
-        <span class="section-index">Export</span>
+        <span class="section-index" data-i18n>Export</span>
         <h2 style="margin:6px 0 0;font-size:20px;color:var(--text-strong)">Export License Required</h2>
       </div>
 
       <div class="lic-section">
-        <div class="lic-label">Have a license key?</div>
+        <div class="lic-label" data-i18n>Have a license key?</div>
         <div class="lic-row">
           <input type="text" id="licKeyInput" class="lic-input" placeholder="APO-eyJ..." autocomplete="off" />
-          <button type="button" id="licActivateBtn" class="primary-btn">Activate</button>
+          <button type="button" id="licActivateBtn" class="primary-btn" data-i18n>Activate</button>
         </div>
         <div id="licActivateMsg" class="lic-msg"></div>
       </div>
@@ -739,7 +806,7 @@
       <div class="lic-divider">or</div>
 
       <div class="lic-section">
-        <div class="lic-label">Don't have a license yet?</div>
+        <div class="lic-label" data-i18n>Don't have a license yet?</div>
 
         <!-- 가격도 티어도 제품 안에 없어서, 구매자가 두 안을 비교할 방법이
              없었다(구매자 관점 비판 1순위). 무엇이 다른지 여기서 보여준다. -->
@@ -766,14 +833,14 @@
 
         <div class="lic-row">
           <input type="email" id="licEmailInput" class="lic-input" placeholder="Enter your email" />
-          <button type="button" id="licBuyBtn" class="secondary-btn">Buy Now →</button>
+          <button type="button" id="licBuyBtn" class="secondary-btn" data-i18n>Buy Now →</button>
         </div>
-        <div class="lic-note">Checkout opens in a new tab; your licence key is emailed after purchase.<br>One-time purchase · Air-gapped network support · Everything except exporting is free forever.</div>
+        <div class="lic-note" data-i18n>Checkout opens in a new tab; your licence key is emailed after purchase.<br>One-time purchase · Air-gapped network support · Everything except exporting is free forever.</div>
 
         <!-- 사기 전에 산출물을 볼 방법이 없던 것이 두 번째 문제였다. -->
         <div class="lic-row" style="margin-top:12px">
-          <button type="button" id="licSampleBtn" class="secondary-btn">See a sample report (.xlsx)</button>
-          <span class="lic-note" style="margin:0">Real output, built from a bundled demo configuration.</span>
+          <button type="button" id="licSampleBtn" class="secondary-btn" data-i18n>See a sample report (.xlsx)</button>
+          <span class="lic-note" style="margin:0" data-i18n>Real output, built from a bundled demo configuration.</span>
         </div>
       </div>
 
@@ -783,5 +850,6 @@
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   <script src="{{ url_for('static', filename='shell.js') }}"></script>
+  <script src="{{ url_for('static', filename='i18n.js') }}"></script>
 </body>
 </html>
