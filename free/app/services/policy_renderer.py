@@ -91,6 +91,29 @@ def extract_name_metadata(name: str, schedule: str | None = None) -> dict[str, A
     return result
 
 
+
+def _stats_for(runtime_stats: dict, ptype: str) -> dict:
+    """정책 종류별 사용량 통계를 고른다.
+
+    FortiGate는 firewall 정책과 proxy 정책에 **각각 1번부터** 번호를 매긴다.
+    그래서 두 통계를 한 딕셔너리에 합치면 proxy 7번의 hit_count·last_used·status가
+    firewall 7번에 그대로 얹힌다. 살아 있는 정책이 "한 번도 안 쓰임"으로 바뀌어
+    Critical·"Disable now"로 판정되고, 장비에 적용할 후보 목록에까지 올라간다
+    (실 config에서 fw/proxy ID 충돌 44건 관측 — workbook_exporter 주석 참조).
+
+    새 형태: {"firewall": {id: stats}, "proxy": {id: stats}}
+    옛 형태: {id: stats}  — 종류를 알 수 없으므로 예전처럼 양쪽에 그대로 쓴다.
+    호출부가 종류를 알려주지 않던 시절의 입력(구형 클라이언트·직접 API 호출)이
+    조용히 깨지지 않게 하기 위한 하위호환이다.
+    """
+    if not isinstance(runtime_stats, dict) or not runtime_stats:
+        return {}
+    if "firewall" in runtime_stats or "proxy" in runtime_stats:
+        scoped = runtime_stats.get(ptype) or {}
+        return scoped if isinstance(scoped, dict) else {}
+    return runtime_stats
+
+
 def build_view_model(parsed: dict[str, Any], runtime_stats: dict[str, dict[str, Any]]) -> dict[str, Any]:
     interface_map = _index_by_key(parsed.get("system_interface", []), "port")
     address_map = _index_by_key(parsed.get("firewall_address", []), "name")
@@ -115,11 +138,11 @@ def build_view_model(parsed: dict[str, Any], runtime_stats: dict[str, dict[str, 
             "interface_count": len(parsed.get("system_interface", [])),
         },
         "firewall_policy": [
-            _render_policy(item, interface_map, address_map, addrgrp_map, service_custom_map, service_group_map, runtime_stats)
+            _render_policy(item, interface_map, address_map, addrgrp_map, service_custom_map, service_group_map, _stats_for(runtime_stats, "firewall"))
             for item in parsed.get("firewall_policy", [])
         ],
         "firewall_proxy_policy": [
-            _render_policy(item, interface_map, proxy_address_map, proxy_addrgrp_map, service_custom_map, service_group_map, runtime_stats)
+            _render_policy(item, interface_map, proxy_address_map, proxy_addrgrp_map, service_custom_map, service_group_map, _stats_for(runtime_stats, "proxy"))
             for item in parsed.get("firewall_proxy_policy", [])
         ],
         "firewall_multicast_policy": [

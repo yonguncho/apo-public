@@ -1,0 +1,13 @@
+Policy ID,Hit Count,Last Used,Status,Name
+1,88422,2026-07-20,enabled,ANY-ANY-ALL-permit
+2,0,-,enabled,OLD-migration-temp-2019
+3,140,2026-06-10,enabled,LEGACY-telnet-mgmt
+4,0,-,disabled,DISABLED-old-partner-rule
+5,530,2026-07-25,enabled,BLOCK-inbound-default-deny
+6,20455,2026-07-28,enabled,251015_RITM0044821_user-to-web
+7,8110,2026-07-22,enabled,user-to-db-mixed-svc
+8,64000,2026-07-27,enabled,server-to-server-any
+9,301240,2026-07-29,enabled,user-auth-to-ad
+10,45300,2026-07-26,enabled,web-to-db-mssql
+11,90,2026-07-18,enabled,backup-window-nightly
+12,0,-,enabled,temp-test-anyany

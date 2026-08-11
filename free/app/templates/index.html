@@ -641,6 +641,7 @@
           <div class="sev-user-range-row">
             <span class="inline-status" id="setLicenseState">Checking…</span>
             <button type="button" id="setLicenseBtn" class="secondary-btn">Enter a licence key</button>
+            <button type="button" id="setSampleBtn" class="secondary-btn">See a sample report</button>
           </div>
         </div>
       </article>
@@ -739,11 +740,41 @@
 
       <div class="lic-section">
         <div class="lic-label">Don't have a license yet?</div>
+
+        <!-- 가격도 티어도 제품 안에 없어서, 구매자가 두 안을 비교할 방법이
+             없었다(구매자 관점 비판 1순위). 무엇이 다른지 여기서 보여준다. -->
+        <div class="tier-grid">
+          <label class="tier-card" for="tierSingle">
+            <input type="radio" name="apoTier" id="tierSingle" value="single" checked />
+            <div class="tier-head"><span class="tier-name">Single organisation</span><span class="tier-price">$199</span></div>
+            <ul class="tier-feat">
+              <li>Audit the firewalls of one organisation</li>
+              <li>All exports: Excel audit workbook, action plan, evidence</li>
+              <li>1 year of updates, then keep using the version you bought</li>
+            </ul>
+          </label>
+          <label class="tier-card" for="tierMsp">
+            <input type="radio" name="apoTier" id="tierMsp" value="msp" />
+            <div class="tier-head"><span class="tier-name">MSP / Consultant</span><span class="tier-price">$699</span></div>
+            <ul class="tier-feat">
+              <li>Everything in Single organisation</li>
+              <li><strong>Use across all your client organisations</strong></li>
+              <li><strong>White-label reports</strong> — your company name on the workbook</li>
+            </ul>
+          </label>
+        </div>
+
         <div class="lic-row">
           <input type="email" id="licEmailInput" class="lic-input" placeholder="Enter your email" />
           <button type="button" id="licBuyBtn" class="secondary-btn">Buy Now →</button>
         </div>
-        <div class="lic-note">Enter your email and click <strong>Buy Now</strong> → checkout opens in a new tab.<br>Your license key will be emailed to you after purchase.<br>One-time purchase · Lifetime license · Air-gapped network support</div>
+        <div class="lic-note">Checkout opens in a new tab; your licence key is emailed after purchase.<br>One-time purchase · Air-gapped network support · Everything except exporting is free forever.</div>
+
+        <!-- 사기 전에 산출물을 볼 방법이 없던 것이 두 번째 문제였다. -->
+        <div class="lic-row" style="margin-top:12px">
+          <button type="button" id="licSampleBtn" class="secondary-btn">See a sample report (.xlsx)</button>
+          <span class="lic-note" style="margin:0">Real output, built from a bundled demo configuration.</span>
+        </div>
       </div>
 
       <button type="button" id="licCloseBtn" class="lic-close">✕</button>

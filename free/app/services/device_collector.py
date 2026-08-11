@@ -184,13 +184,16 @@ def collect_from_device(device: dict) -> dict:
     config_text = r.text
 
     # 2) 정책 통계 (실패해도 config 분석은 가능 → 경고만)
-    runtime_stats: dict = {}
-    for path, label in (("monitor/firewall/policy", "policy"),
-                        ("monitor/firewall/proxy-policy", "proxy-policy")):
+    # 정책 종류별로 분리해 담는다. 합치면 proxy 7번 통계가 firewall 7번에
+    # 얹혀 살아 있는 정책이 "미사용"으로 판정된다(FortiGate는 두 종류에 각각
+    # 1번부터 번호를 매긴다).
+    runtime_stats: dict = {"firewall": {}, "proxy": {}}
+    for path, label, ns in (("monitor/firewall/policy", "policy", "firewall"),
+                            ("monitor/firewall/proxy-policy", "proxy-policy", "proxy")):
         try:
             rr = _get(ip, port, token, verify, path)
             if rr.status_code == 200:
-                runtime_stats.update(_policy_stats_from_monitor(rr.json()))
+                runtime_stats[ns].update(_policy_stats_from_monitor(rr.json()))
             else:
                 warnings.append(f"{label} stats unavailable (HTTP {rr.status_code}) "
                                 "— hit-count/last-used checks limited")

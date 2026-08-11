@@ -148,7 +148,8 @@
     const hint = $("setLicenseHint");
     if (hint) hint.textContent = !state.license ? ""
       : licensed ? (msp ? "MSP / Consultant — report white-labelling enabled" : "Single organisation")
-                 : "one-time purchase · includes 1 year of updates";
+                 // 미구매 상태에서는 두 안의 가격을 여기서 처음 본다.
+                 : "$199 single organisation · $699 MSP / consultant";
   }
 
   /* ── Overview ────────────────────────────────────────────────── */

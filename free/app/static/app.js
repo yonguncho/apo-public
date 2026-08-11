@@ -210,6 +210,15 @@ configPickerBtn.addEventListener('click', () => configFileInput.click());
 fwCsvPickerBtn.addEventListener('click', () => fwPolicyCsvFile.click());
 proxyCsvPickerBtn.addEventListener('click', () => proxyPolicyCsvFile.click());
 
+/* 사용량 통계 건수. 종류별 형태({firewall,proxy})와 평평한 옛 형태를 모두 센다. */
+function _statsCount(rs) {
+  if (!rs || typeof rs !== 'object') return 0;
+  if (rs.firewall || rs.proxy) {
+    return Object.keys(rs.firewall || {}).length + Object.keys(rs.proxy || {}).length;
+  }
+  return Object.keys(rs).length;
+}
+
 /* 상단 상태바·Overview는 shell.js가 그린다. 여기서는 "무엇이 로드됐는지"만 알린다. */
 function notifyConfigLoaded(sourceLabel, filename, configSha) {
   const meta = currentView?.meta || {};
@@ -223,7 +232,7 @@ function notifyConfigLoaded(sourceLabel, filename, configSha) {
     // 개수를 못 셌으면 0이 아니라 null — "정책 0건"으로 보이면 안 된다.
     policies: counted ? (meta.policy_count ?? 0) + (meta.proxy_policy_count ?? 0) : null,
   });
-  window.APO?.onUsage?.(Object.keys(currentRuntimeStats || {}).length);
+  window.APO?.onUsage?.(_statsCount(currentRuntimeStats));
 }
 
 function applyLoadedConfig(data, sourceLabel) {
@@ -327,6 +336,11 @@ async function importPolicyCsv(file, type) {
   if (!file) return;
   const formData = new FormData();
   formData.append('policy_stats_files', file);
+  /* 어느 종류의 정책 통계인지 반드시 알려야 한다. FortiGate는 firewall과
+     proxy 정책에 각각 1번부터 번호를 매겨서, 종류 없이 합치면 proxy 7번의
+     사용 이력이 firewall 7번에 얹힌다 — 살아 있는 정책이 "미사용"으로 바뀌어
+     Critical로 판정되고 장비 적용 후보에까지 오른다. */
+  formData.append('policy_type', type === 'FW' ? 'firewall' : 'proxy');
   policyStatsStatus.textContent = `Importing ${type} CSV...`;
 
   let res, data;
@@ -343,7 +357,17 @@ async function importPolicyCsv(file, type) {
     return;
   }
 
-  currentRuntimeStats = { ...currentRuntimeStats, ...(data.runtime_stats || {}) };
+  // 화면 쪽 병합도 같은 규칙을 따른다(사용량 칩·근거 패널이 이 개수를 본다)
+  {
+    const ns = type === 'FW' ? 'firewall' : 'proxy';
+    const cur = (currentRuntimeStats && (currentRuntimeStats.firewall || currentRuntimeStats.proxy))
+      ? currentRuntimeStats : { firewall: {}, proxy: {} };
+    currentRuntimeStats = {
+      firewall: { ...(cur.firewall || {}) },
+      proxy: { ...(cur.proxy || {}) },
+    };
+    currentRuntimeStats[ns] = { ...currentRuntimeStats[ns], ...(data.runtime_stats || {}) };
+  }
 
   if (type === 'FW') {
     fwCsvSummary = { summary: data.summary, filename: file.name };
@@ -353,7 +377,7 @@ async function importPolicyCsv(file, type) {
 
   renderPolicyCsvSummary();
   policyStatsStatus.textContent = `${type} Policy CSV applied: ${file.name}`;
-  window.APO?.onUsage?.(Object.keys(currentRuntimeStats || {}).length);
+  window.APO?.onUsage?.(_statsCount(currentRuntimeStats));
   await rerenderWithRuntimeStats();
 
   // severity 결과가 있으면 자동 재분류 (sevData는 다른 IIFE 스코프이므로 window 플래그로 감지)
@@ -811,7 +835,13 @@ renderActiveTab();
 
 
 /* APO License Gate & Modal */
+/* 티어별 체크아웃. 웹훅은 상품명에 MSP/Consultant가 들어가면 tier=msp 키를
+   발급하므로, 화면은 올바른 상품으로 보내기만 하면 된다.
+   MSP URL이 아직 안 채워졌으면 스토어 첫 화면으로 보낸다 — 깨진 체크아웃보다
+   낫고, 거기서 상품을 고르면 결과는 같다. */
 const LEMON_CHECKOUT_URL = 'https://choiceguidelab.lemonsqueezy.com/checkout/buy/1c83b59f-7f23-4899-a173-dc43d1c7bce6';
+const LEMON_CHECKOUT_URL_MSP = '';   // TODO: MSP/Consultant 상품의 checkout/buy URL
+const LEMON_STORE_URL = 'https://choiceguidelab.lemonsqueezy.com/';
 
 let _licensed = null;  // null=미확인, true/false
 let _pendingExportBtnId = null;  // 게이트를 띄운 export 버튼 id (활성화 후 재실행용)
@@ -925,7 +955,13 @@ document.getElementById('licBuyBtn')?.addEventListener('click', () => {
     if (inp) { inp.focus(); inp.style.borderColor = 'rgba(214,43,32,.6)'; }
     return;
   }
-  const url = `${LEMON_CHECKOUT_URL}?checkout[email]=${encodeURIComponent(email)}`;
+  const tier = document.querySelector('input[name="apoTier"]:checked')?.value || 'single';
+  const base = tier === 'msp' ? (LEMON_CHECKOUT_URL_MSP || LEMON_STORE_URL)
+                              : LEMON_CHECKOUT_URL;
+  // 스토어 첫 화면에는 email 프리필이 안 먹는다 — 붙이면 지저분한 쿼리만 남는다.
+  const url = base.includes('/checkout/buy/')
+    ? `${base}?checkout[email]=${encodeURIComponent(email)}`
+    : base;
   // 팝업 차단 우회: 같은 탭에서 이동 후 바로 복귀 가능하도록 새 탭으로 직접 이동
   const a = document.createElement('a');
   a.href = url;
@@ -934,6 +970,33 @@ document.getElementById('licBuyBtn')?.addEventListener('click', () => {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+});
+
+/* 샘플 리포트 — 라이선스 없이도 산출물을 볼 수 있어야 한다. 서버가 번들
+   데모 설정으로 만들어 주므로 지금 열어 둔 고객 설정은 건드리지 않는다. */
+async function downloadSampleReport(btn) {
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Building sample...'; }
+  try {
+    const r = await fetch('/api/sample-report');
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Failed');
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'APO_sample_report.xlsx';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    if (btn) btn.textContent = 'Downloaded ✓';
+  } catch (e) {
+    if (btn) btn.textContent = 'Sample failed';
+    console.error('sample report:', e);
+  } finally {
+    if (btn) setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 1600);
+  }
+}
+['licSampleBtn', 'setSampleBtn'].forEach(id => {
+  const b = document.getElementById(id);
+  if (b) b.addEventListener('click', () => downloadSampleReport(b));
 });
 
 // 앱 시작 시 버튼 먼저 비활성화 → 라이선스 확인 후 활성화

@@ -67,7 +67,7 @@ _CLOCK_GRACE = timedelta(days=2)
 #
 # UPDATE_POLICY_START 이전에 발급된 키(기존 구매자 전원)는 영구 업데이트로
 # 조부 조항 처리한다. 판매 후 약관을 소급 변경하지 않기 위해서다.
-RELEASE_DATE = date(2026, 8, 10)
+RELEASE_DATE = date(2026, 8, 11)
 UPDATE_POLICY_START = date(2026, 8, 6)
 UPDATE_WINDOW = timedelta(days=365)
 

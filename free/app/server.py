@@ -183,11 +183,20 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v90-2026-08-10"
+APO_VERSION = "v91-2026-08-11"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _stats_count(runtime_stats) -> int:
+    """사용량 통계 건수. 평평한 형태와 종류별 형태를 모두 센다."""
+    if not isinstance(runtime_stats, dict):
+        return 0
+    if "firewall" in runtime_stats or "proxy" in runtime_stats:
+        return sum(len(v) for v in runtime_stats.values() if isinstance(v, dict))
+    return len(runtime_stats)
 
 
 def _config_sha(raw: str) -> str:
@@ -408,8 +417,16 @@ def create_app() -> Flask:
             stats = parser.parse_text(pasted_text)
             merged.update(stats)
 
+        # 이 경로(CLI 출력 붙여넣기)는 정책 종류를 알 수 없다. 이미 종류별로
+        # 나뉜 상태에 평평하게 합치면 _stats_for가 네임스페이스만 읽어 방금 넣은
+        # 통계를 통째로 버린다 — 조용히 '사용량 없음'이 되어 미사용 판정으로
+        # 이어지므로 가장 위험한 실패다. 종류를 모르면 양쪽에 넣는다.
         existing = app.config.get('last_runtime_stats') or {}
-        existing.update(merged)
+        if "firewall" in existing or "proxy" in existing:
+            for k in ("firewall", "proxy"):
+                existing.setdefault(k, {}).update(merged)
+        else:
+            existing.update(merged)
         app.config['last_runtime_stats'] = existing
 
         return jsonify({"runtime_stats": merged})
@@ -430,9 +447,27 @@ def create_app() -> Flask:
             stats = parser.parse_text(pasted_text)
             merged.update(stats)
 
-        # 기존 stats에 병합 (FW CSV → Proxy CSV 순서로 올려도 둘 다 유지)
+        # 정책 종류별로 담는다. 평평하게 합치면 FW CSV와 Proxy CSV의 같은 번호가
+        # 서로를 덮어써, 어느 파일을 먼저 올렸느냐에 따라 판정이 달라졌다.
+        # 종류를 안 알려주면(구형 클라이언트·직접 호출) 예전처럼 평평하게 둔다.
+        ptype = str(request.form.get("policy_type", "")).strip().lower()
+        ns = {"fw": "firewall", "firewall": "firewall",
+              "proxy": "proxy", "proxy-policy": "proxy"}.get(ptype)
         existing = app.config.get('last_runtime_stats') or {}
-        existing.update(merged)
+        if ns:
+            if not ("firewall" in existing or "proxy" in existing):
+                # 평평한 옛 상태 → 종류별로 승격. 기존 값을 버리면 사용자가 앞서
+                # 붙여넣은 통계가 조용히 사라진다. 평평했다는 건 "종류를 몰라
+                # 양쪽에 적용"이라는 뜻이므로 그대로 양쪽에 복사한 뒤 덮어쓴다.
+                existing = {"firewall": dict(existing), "proxy": dict(existing)}
+            existing.setdefault(ns, {}).update(merged)
+        else:
+            if "firewall" in existing or "proxy" in existing:
+                # 이미 종류별인데 종류 없는 입력이 오면 양쪽에 넣는 수밖에 없다
+                for k in ("firewall", "proxy"):
+                    existing.setdefault(k, {}).update(merged)
+            else:
+                existing.update(merged)
         app.config['last_runtime_stats'] = existing
         summary = {
             "count": len(merged),
@@ -618,7 +653,9 @@ def create_app() -> Flask:
             "thresholds": merged_ctx["thresholds"],
             "rules": merged_ctx["rules"],
             "user_range_count": len(app.config.get('user_ranges', [])),
-            "csv_loaded": bool(app.config.get('last_runtime_stats')),
+            # 종류별 dict는 비어 있어도 truthy다({"firewall":{},"proxy":{}}).
+            # 실제 건수를 봐야 "사용량 데이터 있음"이 사실이 된다.
+            "csv_loaded": _stats_count(app.config.get('last_runtime_stats')) > 0,
         }
         if _branding_allowed():
             b = _load_branding()
@@ -635,6 +672,91 @@ def create_app() -> Flask:
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={"Content-Disposition": "attachment; filename=severity_export.xlsx"}
         )
+
+    # ── 샘플 리포트 (무료) ────────────────────────────────────────────────
+    # 이 도구의 가치는 결국 엑셀 산출물인데, 지금까지는 **사기 전에 그걸 볼
+    # 방법이 없었다**. 번들된 데모 설정으로 같은 파이프라인을 돌려 실제 워크북을
+    # 그대로 내려준다. 라이선스 게이트를 걸지 않는다 — 게이트를 걸면 "사기 전엔
+    # 못 본다"는 문제가 그대로다.
+    @app.get("/api/sample-report")
+    def sample_report():
+        """번들 데모 설정으로 만든 실제 감사 워크북.
+
+        현재 세션 상태(last_parsed 등)를 **절대 건드리지 않는다**. 사용자가
+        고객 설정을 열어 둔 채 샘플을 눌렀다가 작업이 날아가면 안 된다.
+        """
+        from app.services.workbook_exporter import build_severity_workbook
+        from app.services.policy_renderer import build_view_model
+        from app.services.reachability import detect_unreachable
+        from app.parsers.policy_csv_parser import PolicyStatsCsvParser
+        import hashlib as _hashlib
+
+        # DATA_DIR은 사용자 데이터 경로다. 번들 자산은 app/data에 있고, frozen
+        # 상태에서는 _MEIPASS 아래로 풀린다(version_advisor와 같은 규칙).
+        if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
+            bundled = Path(_sys._MEIPASS) / "app" / "data"
+        else:
+            bundled = Path(__file__).resolve().parent / "data"
+        cfg_path = bundled / "sample_config.conf"
+        csv_path = bundled / "sample_policy_stats.csv"
+        if not cfg_path.exists():
+            return jsonify({"error": "Sample configuration is not bundled in this build."}), 404
+        raw = cfg_path.read_text(encoding="utf-8", errors="ignore")
+        parsed = FortiGateConfigParser(raw).parse()
+
+        # 샘플 CSV는 firewall 정책 통계다. 평평하게 넘기면 proxy 정책이 같은
+        # 번호의 firewall 통계를 빌려가, v91이 고친 교차오염을 **샘플 산출물에서
+        # 그대로 재현**한다(샘플 config에 proxy-policy 1·2가 있다).
+        runtime_stats = {"firewall": {}, "proxy": {}}
+        if csv_path.exists():
+            try:
+                runtime_stats["firewall"] = PolicyStatsCsvParser().parse_text(
+                    csv_path.read_text(encoding="utf-8-sig", errors="ignore"))
+            except Exception:
+                runtime_stats["firewall"] = {}
+
+        # 샘플이 '판정 불가'로 도배되지 않도록 데모 설정의 사용자 대역을 준다.
+        context = {
+            "service_groups": parsed.get("service_groups", {}),
+            "user_ranges": [{"cidr": "10.10.0.0/16"}],
+            "today": _date.today(),
+            **_engine_ctx(),
+        }
+        view = build_view_model(parsed, runtime_stats)
+        classify = lambda ps: [{**p, **evaluate_severity(p, context)} for p in (ps or [])]
+        meta = parsed.get("meta", {})
+        payload = {
+            "firewall": classify(view.get("firewall_policy", [])),
+            "proxy": classify(view.get("firewall_proxy_policy", [])),
+            "inactive_rules": describe_inactive_rules(app.config['profile']),
+            "reachability": {**detect_unreachable(parsed, None),
+                             "fqdn_captured_at": None},
+            "report_meta": {
+                "apo_version": APO_VERSION,
+                "generated_at": _dt.now().strftime("%Y-%m-%d %H:%M"),
+                "hostname": meta.get("hostname") or "DEMO-FGT-01",
+                "config_version": meta.get("config_version") or "",
+                "buildno": meta.get("buildno") or "",
+                "config_filename": "sample_config.conf",
+                "config_sha256": _hashlib.sha256(raw.encode("utf-8", "ignore")).hexdigest(),
+                "profile": (app.config['profile'].get("meta") or {}).get("name", "default"),
+                "thresholds": context["thresholds"],
+                "rules": context["rules"],
+                "user_range_count": 1,
+                "csv_loaded": bool(runtime_stats),
+                # 이게 실제 장비 보고서로 오해되면 안 된다.
+                "sample": True,
+            },
+        }
+        try:
+            xlsx_bytes = build_severity_workbook(payload)
+        except Exception as exc:
+            print(f"[APO] sample report failed: {exc}", flush=True)
+            return jsonify({"error": "Failed to build the sample report"}), 500
+        return app.response_class(
+            response=xlsx_bytes, status=200,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={"Content-Disposition": "attachment; filename=APO_sample_report.xlsx"})
 
     # ── 정확도 검증 워크플로우 ─────────────────────────────────────────────
     # 의도적으로 무료다: 이 기능의 목적은 "APO 판정을 그대로 믿지 말고
@@ -818,7 +940,8 @@ def create_app() -> Flask:
             # 본문을 빼면, 장비에서 통계를 잘 받아온 직후에도 화면은 "사용량
             # 없음"이라고 경고한다(재비판 3회전).
             "runtime_stats": data["runtime_stats"],
-            "stats_count": len(data["runtime_stats"]),
+            # 종류별로 나뉘어 있으므로 합계를 센다(예전엔 평평한 dict였다).
+            "stats_count": _stats_count(data["runtime_stats"]),
             "fqdn_count": len(data["fqdn_map"]),
             "warnings": warnings,
             "view": view,

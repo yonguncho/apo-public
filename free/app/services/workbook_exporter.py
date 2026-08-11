@@ -259,6 +259,15 @@ def _add_summary_sheet(wb: Workbook, result: dict) -> None:
     r = 1
     ws.cell(row=r, column=1, value="APO Policy Analysis Report").font = title_font
     r += 1
+    if rm.get("sample"):
+        # 샘플 워크북이 실제 장비 감사 결과로 오해되면, 그걸 근거로 정책을
+        # 지우는 사고가 난다. 첫 줄에 못박는다.
+        c = write_text_cell(ws, r, 1,
+                            "SAMPLE REPORT — generated from a bundled demo "
+                            "configuration (DEMO-FGT-01). This is not an audit "
+                            "of any real device.")
+        c.font = Font(bold=True, size=11, color="9C1F1F")
+        r += 1
     branding = rm.get("branding") or {}
     if branding.get("company"):
         # MSP·컨설턴트 티어 화이트라벨. write_text_cell을 쓰는 이유:
