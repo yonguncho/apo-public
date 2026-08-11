@@ -328,7 +328,8 @@ def _add_summary_sheet(wb: Workbook, result: dict) -> None:
     if reach:
         r = kv(r, "Unreachable policies",
                f"{len(reach.get('unreachable') or [])} "
-               f"(assessed {reach.get('checked', 0)}/{reach.get('total_enabled', 0)}, "
+               f"(assessed {reach.get('checked', 0)}/{reach.get('total_enabled', 0)} "
+               "enabled firewall policies; proxy policies are outside this check, "
                f"{len(reach.get('skipped') or [])} skipped — see Unreachable sheet)")
     r += 1
 
@@ -556,7 +557,8 @@ def _add_unreachable_sheet(wb: Workbook, result: dict) -> None:
     write_text_cell(
         ws, r, 1,
         f"Assessed {reach.get('checked', 0)} of {reach.get('total_enabled', 0)} "
-        f"enabled policies. {len(skipped)} skipped (listed below).")
+        f"enabled firewall policies (proxy policies are not examined by this "
+        f"check). {len(skipped)} skipped (listed below).")
     r += 1
     write_text_cell(ws, r, 1, str(reach.get("note", "")))
     ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)

@@ -216,8 +216,8 @@
     const sk = (state.reach?.skipped || []).length;
     $("ovMetricUnreachableNote").textContent = !state.reach
       ? "unreachable — never match traffic"
-      : sk ? `checked ${state.reach.checked} of ${state.reach.total_enabled} enabled — ${sk} could not be resolved`
-           : `all ${state.reach.checked} enabled policies checked`;
+      : sk ? `checked ${state.reach.checked} of ${state.reach.total_enabled} enabled firewall policies — ${sk} could not be resolved`
+           : `all ${state.reach.checked} enabled firewall policies checked`;
 
     // 심각도 분포
     const counts = {};
@@ -299,8 +299,8 @@
     if (state.reach) {
       const skipped = (state.reach.skipped || []).length;
       g.push(skipped
-        ? warn("Unreachable check coverage", `${state.reach.checked}/${state.reach.total_enabled} policies assessed; ${skipped} skipped because their objects cannot be resolved offline.`, "severity", "unreachable")
-        : ok("Unreachable check coverage", `All ${state.reach.checked} enabled policies assessed.`));
+        ? warn("Unreachable check coverage", `${state.reach.checked}/${state.reach.total_enabled} enabled firewall policies assessed; ${skipped} skipped because their objects cannot be resolved offline. Proxy policies are outside this check.`, "severity", "unreachable")
+        : ok("Unreachable check coverage", `All ${state.reach.checked} enabled firewall policies assessed. Proxy policies are outside this check.`));
       if (state.reach.fqdn_captured_at) {
         g.push(ok("FQDN resolutions", `Captured ${state.reach.fqdn_captured_at} — FQDN findings are provable as of that time, not indefinitely.`));
       }

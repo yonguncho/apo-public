@@ -508,6 +508,42 @@ def _addr_fail_reason(names, addr_map: dict, vip_map: dict, dns_names: set,
     return f"{side} address cannot be reduced to IP ranges"
 
 
+def _is_universal(p: dict) -> bool:
+    """이 정책이 '모든 패킷'을 매칭하는가.
+
+    그렇다면 아래 정책이 무엇을 담고 있든 — ISDB든 geography든 사용자 객체든,
+    우리가 오프라인에서 환원하지 못하는 무엇이든 — 그 정책의 패킷 집합은 이
+    정책의 부분집합이다. 즉 **내용을 몰라도 도달불가를 증명할 수 있다.**
+
+    이 덕분에 ISDB 목록을 따로 임포트하지 않아도 상당수의 '판정 보류'가
+    풀린다. 사용자에게 수동 임포트를 요구하기 전에 먼저 짜낼 값이었다.
+
+    오탐 0 원칙을 지키려고 조건을 최대한 좁게 잡는다:
+      - 환원 불가 요소(ISDB·negate·IPv6 등)가 이 정책 자체에 있으면 제외.
+        예를 들어 internet-service가 켜져 있으면 dstaddr는 무시되므로
+        'all'이어도 전체를 덮지 않는다.
+      - accept만 인정. deny는 VIP로 DNAT된 트래픽을 match-vip 없이 매칭하지
+        않으므로, 아래 정책이 VIP 목적지일 때 덮는다고 말할 수 없다.
+
+    인터페이스는 여기서 보지 않는다 — 호출부가 대상 정책과 직접 비교한다.
+    주소/서비스를 환원하지 못해도 인터페이스는 알 수 있기 때문이다.
+    """
+    for key in _UNRESOLVABLE_POLICY_KEYS:
+        val = p.get(key)
+        if val not in (None, "", [], "disable"):
+            return False
+    if str(p.get("action", "")).lower() != "accept":
+        return False
+    if str(p.get("status", "enable")).lower() not in ("enable", "enabled", ""):
+        return False
+    if str(p.get("schedule") or "always").lower() != "always":
+        return False
+    low = lambda xs: {str(x).strip().lower() for x in (xs or [])}
+    if low(p.get("srcaddr")) != {"all"} or low(p.get("dstaddr")) != {"all"}:
+        return False
+    return low(p.get("service")) == {"all"}
+
+
 def _policy_space(p: dict, addr_map: dict, svc_map: dict,
                   vip_map: dict | None = None, dns_names: set | None = None,
                   capture_names: set | None = None):
@@ -606,8 +642,44 @@ def detect_unreachable(parsed: dict, fqdn_map: dict | None = None) -> dict:
                     })
                     break
         elif space is None and status in ("enable", "enabled", ""):
-            skipped.append({"policy_id": p.get("policy_id"),
-                            "name": p.get("name", ""), "reason": why})
+            # VIP 목적지 정책은 이 지름길에서 제외한다.
+            #
+            # FQDN·ISDB·사용자 객체는 "무엇으로 풀리든 전체의 부분집합"이라는
+            # 논증이 그대로 성립한다. 그러나 VIP는 DNAT 의미론이 얽혀서
+            # (dstaddr=all이 VIP 트래픽을 매칭하는지, match-vip 여부 등) 같은
+            # 논증을 쓸 수 없다. 여기서 틀리면 살아 있는 정책을 '도달 불가'로
+            # 보고하게 되고, 그건 이 기능이 절대 하지 않기로 한 오탐이다.
+            # 확신이 없으면 말하지 않는다 — 판정 보류로 남긴다.
+            touches_vip = any(str(n) in (vip_map or {})
+                              for n in (p.get("dstaddr") or []))
+            # 인터페이스까지 덮는 '전부 매칭' 정책만 인정한다.
+            universal = None if touches_vip else next(
+                (sp for sp, _ in shadowers
+                 if _is_universal(sp)
+                 and _intf_covers(sp.get("srcintf") or [], p.get("srcintf") or [])
+                 and _intf_covers(sp.get("dstintf") or [], p.get("dstintf") or [])),
+                None)
+            if universal is not None:
+                # 환원은 못 했지만 결론이 났으므로 '판정함'에 넣는다. 안 그러면
+                # 커버리지가 "10/11 검사, 0건 보류"처럼 자기모순이 된다.
+                checked += 1
+                unreachable.append({
+                    "proof": "config",
+                    "policy_id": p.get("policy_id"),
+                    "name": p.get("name", ""),
+                    "shadowed_by": universal.get("policy_id"),
+                    "shadowed_by_name": universal.get("name", ""),
+                    "shadowed_by_action": universal.get("action", ""),
+                    "detail": (
+                        f"Policy {universal.get('policy_id')} above it accepts every "
+                        "packet on the same interfaces (any source, any destination, "
+                        "all services), so this policy can never match — regardless "
+                        f"of what its objects resolve to ({why})."
+                    ),
+                })
+            else:
+                skipped.append({"policy_id": p.get("policy_id"),
+                                "name": p.get("name", ""), "reason": why})
 
         # shadower 자격: 환원 가능 + 활성 + 상시 스케줄 + 비 VIP 목적지.
         # 스케줄 정책은 꺼진 시간대에 아래 정책이 매칭될 수 있고, VIP 목적지
@@ -627,6 +699,8 @@ def detect_unreachable(parsed: dict, fqdn_map: dict | None = None) -> dict:
             if str(p.get("status", "enable")).lower() in ("enable", "enabled", "")),
         "capture_used": bool(fqdn_map),
         "note": (
+            "Scope: firewall policies only — proxy policies are not examined by "
+            "this check, so they are neither reported nor counted here. "
             "Conservative static analysis: a policy is reported only when a single "
             "always-on policy above it provably matches every packet it could match. "
             "Policies using FQDN/geography/ISDB/user objects or negation are skipped "

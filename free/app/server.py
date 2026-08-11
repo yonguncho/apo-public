@@ -60,8 +60,28 @@ def _section_signature(items):
     return result
 
 def _compute_config_diff(old_data, new_data):
-    old_policies = _build_policy_map(old_data.get("firewall_policy") or old_data.get("policies") or [])
-    new_policies = _build_policy_map(new_data.get("firewall_policy") or new_data.get("policies") or [])
+    """설정 두 개를 비교한다.
+
+    firewall과 proxy 정책을 **둘 다** 센다. 예전에는 firewall만 세고 proxy는
+    'other changes'로 흘려보냈는데, 그 수치가 감사 증적 워크북의
+    "Policies added / removed / modified" 열로 그대로 들어간다. proxy 정책을
+    추가한 구간이 "정책 변경 0건"으로 기록되는 건 증적 문서로서 결함이다.
+
+    FortiGate는 두 종류에 각각 1번부터 번호를 매기므로 키에 종류를 붙인다 —
+    안 그러면 firewall 7번과 proxy 7번이 서로를 덮어쓴다.
+    """
+    def _policies_of(data):
+        out = {}
+        for section, ptype in (("firewall_policy", "firewall"),
+                               ("firewall_proxy_policy", "proxy")):
+            items = data.get(section) or ([] if section != "firewall_policy"
+                                          else data.get("policies") or [])
+            for key, pol in _build_policy_map(items).items():
+                out[f"{ptype}:{key}"] = {**pol, "_ptype": ptype}
+        return out
+
+    old_policies = _policies_of(old_data)
+    new_policies = _policies_of(new_data)
 
     added_policies = []
     removed_policies = []
@@ -75,7 +95,10 @@ def _compute_config_diff(old_data, new_data):
                 changed_policies.append({
                     # added/removed는 정책 객체의 int ID를 그대로 내는데 여기만
                     # 맵 키(str)를 내고 있었다(감사 C6). 타입을 맞춘다.
-                    "policy_id": int(pid) if str(pid).isdigit() else pid,
+                    "policy_id": (int(policy.get("policy_id"))
+                                  if str(policy.get("policy_id", "")).isdigit()
+                                  else policy.get("policy_id")),
+                    "policy_type": policy.get("_ptype", "firewall"),
                     "name": policy.get("name") or old_policies[pid].get("name") or "",
                     "before": old_policies[pid],
                     "after": policy,
@@ -121,6 +144,7 @@ def _compute_config_diff(old_data, new_data):
 
     known_sections = {
         "firewall_policy",
+        "firewall_proxy_policy",
         "policies",
         "firewall_address",
         "firewall_addrgrp",
@@ -183,7 +207,7 @@ from app.services.license_checker import activate, is_licensed, get_license_info
 from io import BytesIO
 
 import sys as _sys
-APO_VERSION = "v94-2026-08-11"
+APO_VERSION = "v95-2026-08-11"
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     BASE_DIR = Path(_sys._MEIPASS)
 else:
