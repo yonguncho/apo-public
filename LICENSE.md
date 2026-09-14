@@ -13,7 +13,7 @@ written consent from the copyright holder.
 ## Export License (paid)
 
 Unlocking the Excel workbook export feature requires a paid, perpetual,
-single-machine license key purchased at https://choiceguidelab.com. See
+per-person license key purchased at https://choiceguidelab.com. See
 [EULA.md](EULA.md) for the full terms governing the paid license.
 
 ## No warranty
