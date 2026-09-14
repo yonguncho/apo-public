@@ -9,8 +9,7 @@ terms below.
 
 Upon purchase, Licensor grants you a non-exclusive, non-transferable,
 perpetual license to activate and use the Excel workbook export feature of
-the Software on **one (1) machine** per license key purchased. The license is
-bound to the machine it was first activated on.
+the Software on **one (1) machine** per license key purchased.
 
 ### License tiers
 
