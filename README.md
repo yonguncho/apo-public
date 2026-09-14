@@ -26,7 +26,7 @@ automatically at `http://127.0.0.1:5000`.
 | Edition | What you get |
 |---|---|
 | **Free** | Full Policy Analysis, Severity classification, and Config Change Review. CSV export. |
-| **Export License ($199, one-time)** | Everything in Free, plus one-click Excel workbook export (all tabs, color-coded by severity). Perpetual license, single machine. |
+| **Export License ($199, one-time)** | Everything in Free, plus one-click Excel workbook export (all tabs, color-coded by severity). Perpetual license for one person, on as many of your own machines as you like. |
 
 Purchase an Export license at **[choiceguidelab.com](https://choiceguidelab.com)**
 — the license key is emailed within a few minutes of purchase.
