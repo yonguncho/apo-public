@@ -9,7 +9,12 @@ terms below.
 
 Upon purchase, Licensor grants you a non-exclusive, non-transferable,
 perpetual license to activate and use the Excel workbook export feature of
-the Software on **one (1) machine** per license key purchased.
+the Software. Each license key is for **one (1) named individual**. That person
+may install and activate it on **any machine they personally work from** — a
+laptop and a jump host on the customer site are one license, not two.
+
+The license may not be shared. If two people need to export at the same time,
+that is two licenses.
 
 ### License tiers
 
@@ -18,8 +23,8 @@ the Software on **one (1) machine** per license key purchased.
   deliver paid analysis or audit services to third parties is not permitted.
 - **MSP / Consultant** — for managed service providers and consultants.
   Permits analyzing configurations of **multiple client organizations** and
-  enables report branding ("Prepared by") in exported workbooks. Still bound
-  to one (1) machine per key.
+  enables report branding ("Prepared by") in exported workbooks. Still one (1)
+  named consultant per key.
 
 Keys purchased before license tiers were introduced are treated as Single
 Organization licenses.
@@ -37,7 +42,8 @@ Renewal for continued updates is optional. Keys purchased before
 
 You may not: (a) resell, sublicense, or share your license key; (b) reverse
 engineer, decompile, or disassemble the Software beyond what is permitted by
-applicable law; (c) use the license key on more than one machine at a time.
+applicable law; (c) share the license key with another person, or use one key
+to let more than one person export at the same time.
 
 ## 3. Delivery
 
