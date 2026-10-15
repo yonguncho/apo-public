@@ -1,11 +1,14 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>APO — Firewall Policy Assurance</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='shell.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v={{ apo_version }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='shell.css') }}?v={{ apo_version }}" />
+  <!-- 저장된 테마를 스타일 적용 전에 읽는다 — shell.js에서 하면 다크로 그려진
+       뒤 라이트로 바뀌는 깜빡임이 매 로드마다 보인다. -->
+  <script>try{if(localStorage.getItem("apo.theme")==="light")document.documentElement.setAttribute("data-theme","light");}catch(e){}</script>
 </head>
 <body>
   <header class="app-header">
@@ -13,13 +16,17 @@
       <div class="app-brand">
         <img src="{{ url_for('static', filename='apo-logo.png') }}" alt="APO" class="app-logo" />
         <div>
-          <div class="app-title">AI-Policy Optimizer <span class="app-title-muted">(APO)</span></div>
+          <div class="app-title">Audit &amp; Policy Optimizer <span class="app-title-muted">(APO)</span></div>
           <div class="app-subtitle">Firewall Policy Assurance · FortiGate</div>
         </div>
       </div>
       <div class="hdr-right">
         <span class="hdr-chip" id="stProfile" title="Assessment criteria in use"></span>
         <span class="hdr-chip" id="stLicense" title="License tier"></span>
+        <div class="theme-seg" id="themeSeg" role="group" aria-label="Colour theme">
+          <button type="button" data-set-theme="dark" title="Dark theme" aria-pressed="true">☾</button>
+          <button type="button" data-set-theme="light" title="Light theme" aria-pressed="false">☀</button>
+        </div>
       </div>
     </div>
   </header>
@@ -33,11 +40,14 @@
         <span class="st-device-sub" id="stDeviceSub">Connect a device or import a config file to begin</span>
       </div>
       <div class="st-chips" id="stChips">
-        <span class="st-chip is-off" id="stChipConfig" title="FortiGate configuration">Config</span>
-        <span class="st-chip is-off" id="stChipUsage" title="Hit count / last used statistics">Usage data</span>
-        <span class="st-chip is-off" id="stChipRanges" title="User IP ranges — needed to tell server traffic from user traffic">User ranges</span>
+        <!-- 이 칩 다섯은 모든 화면에 항상 보이는데 data-i18n 이 없어 한국어
+             모드에서도 영어로 남았다(라운드 29 지적). 값이 아니라 라벨이므로
+             번역 대상이다 — FQDN 은 제품 용어라 그대로 둔다. -->
+        <span class="st-chip is-off" id="stChipConfig" title="FortiGate configuration" data-i18n>Config</span>
+        <span class="st-chip is-off" id="stChipUsage" title="Hit count / last used statistics" data-i18n>Usage data</span>
+        <span class="st-chip is-off" id="stChipRanges" title="User IP ranges — needed to tell server traffic from user traffic" data-i18n>User ranges</span>
         <span class="st-chip is-off" id="stChipFqdn" title="FQDN resolutions — lets FQDN policies be assessed">FQDN</span>
-        <span class="st-chip is-off" id="stChipAssessed" title="Assessment run">Assessed</span>
+        <span class="st-chip is-off" id="stChipAssessed" title="Assessment run" data-i18n>Assessed</span>
       </div>
     </div>
   </div>
@@ -45,6 +55,16 @@
   <!-- 좌측 사이드바. 가로 탭 한 줄로는 하위 항목을 담을 곳이 없어 Findings 안에
        또 탭을 두게 됐고(탭 2단), 그게 어수선함의 큰 축이었다. 사이드바는 하위
        항목을 자연스럽게 품는다. 좁은 화면·표를 넓게 볼 때를 위해 접힌다. -->
+  <!-- 다른 창이 장비를 가져갔을 때 알린다. 이 앱은 한 번에 한 장비만 열 수
+       있는데 그 사실이 화면 어디에도 없어서, 두 번째 창을 열면 첫 창의 모든
+       동작이 409 로 막히고 오류가 시키는 '다시 열기'를 수행할 방법도 없었다
+       (드롭다운에 이미 그 장비가 선택돼 있어 change 가 안 뜬다). -->
+  <div id="deviceConflict" class="device-conflict hidden" role="status">
+    <span id="deviceConflictText"></span>
+    <button type="button" id="deviceConflictFix" class="primary-btn"
+            data-i18n>Reopen this device</button>
+  </div>
+
   <div class="app-body">
     <nav class="app-side" id="appSide">
       <button type="button" class="side-collapse" id="sideCollapseBtn"
@@ -57,8 +77,11 @@
 
       <button type="button" class="side-item" data-view="severity">
         <span class="side-ico">⚑</span><span class="side-txt" data-i18n>Findings</span></button>
+      <!-- 하위 항목에 active를 하드코딩하지 않는다 — 첫 화면은 Overview인데
+           Findings 하위가 펼쳐진 채 강조돼, 그 메뉴에 있는 것처럼 읽혔다(실사용 지적).
+           강조는 Findings에 실제로 들어갈 때 shell.js가 칠한다. -->
       <div class="side-sub" data-sub-of="severity">
-        <button type="button" class="side-subitem active" data-view="severity" data-fnd-goto="policies"
+        <button type="button" class="side-subitem" data-view="severity" data-fnd-goto="policies"
                 data-i18n>Policy findings</button>
         <button type="button" class="side-subitem" data-view="severity" data-fnd-goto="unreachable"
                 data-i18n>Shadowed (unreachable)</button>
@@ -72,8 +95,12 @@
         <span class="side-ico">⇄</span><span class="side-txt" data-i18n>Change review</span></button>
       <button type="button" class="side-item" data-view="evidence">
         <span class="side-ico">▤</span><span class="side-txt" data-i18n>Evidence</span></button>
+      <button type="button" class="side-item" data-view="ipref">
+        <span class="side-ico">⌖</span><span class="side-txt" data-i18n>Config migration</span></button>
 
       <div class="side-gap"></div>
+      <button type="button" class="side-item" data-view="customers">
+        <span class="side-ico">◫</span><span class="side-txt" data-i18n>Customers &amp; devices</span></button>
       <button type="button" class="side-item" data-view="settings">
         <span class="side-ico">⚙</span><span class="side-txt" data-i18n>Settings</span></button>
       <button type="button" class="side-item" data-view="reference">
@@ -85,21 +112,29 @@
     <!-- ══ OVERVIEW ═══════════════════════════════════════════════════ -->
     <section id="overviewView" class="page-view">
       <div id="ovEmpty" class="ov-empty">
-        <h1>Assess a FortiGate ruleset</h1>
-        <p>APO reads a configuration and its usage statistics, then tells you which policies are dead,
-           over-broad, or undocumented — with the evidence behind every call. Everything runs on this
-           machine; nothing is uploaded anywhere.</p>
+        <h1 data-i18n>Assess a FortiGate ruleset</h1>
+        <p data-i18n>APO reads a configuration and each policy's hit count / last used history, then tells you which
+           policies are dead, over-broad, or undocumented — with the evidence behind every call. Everything
+           runs on this machine; nothing is uploaded anywhere.</p>
         <div class="ov-empty-actions">
           <button type="button" id="ovStartCollect" class="primary-btn" data-goto="analysis" data-i18n>Connect a device</button>
           <button type="button" id="ovStartUpload" class="secondary-btn" data-goto="analysis" data-i18n>Import a config file</button>
         </div>
-        <!-- 단계 수는 상단 상태바의 칩과 일치해야 한다. 사용자 IP 대역을 빼면
-             칩은 다섯인데 안내는 셋이라, 준비가 덜 된 채로 결과를 보게 된다. -->
+        <!-- 단계는 "누가 채우는가"로 묶는다 — 번호를 붙이면 순서 강제처럼 읽힌다.
+             상단 상태바의 칩 다섯 개(Config·Usage·User ranges·FQDN·Assessed)가
+             전부 이 세 묶음 안에 있어야 한다. 빠지면 준비가 덜 된 채 결과를 본다.
+             i18n은 textContent를 통째로 바꾸므로 data-i18n은 잎 요소에만 단다. -->
         <div class="ov-empty-steps">
-          <div><span>1</span> Bring in the configuration (device or file)</div>
-          <div><span>2</span> Add usage statistics so disuse can be judged</div>
-          <div><span>3</span> Set your user IP ranges to tell user traffic from server traffic</div>
-          <div><span>4</span> Run the assessment and work the action plan</div>
+          <div class="ov-step"><b data-i18n>Brought in above</b>
+            <span data-i18n>config · hit count / last used · FQDN resolutions</span>
+            <em data-i18n>Device collection brings all three at once — with files, add the policy CSV beside the config.</em></div>
+          <div class="ov-step"><b data-i18n>Entered by hand</b>
+            <span data-i18n>Your user IP ranges</span>
+            <em data-i18n>The line between user and server traffic — needed whichever way the data came in.</em>
+            <button type="button" class="mini-btn" data-goto="severity" data-i18n>Enter now</button></div>
+          <div class="ov-step"><b data-i18n>Then</b>
+            <span data-i18n>Run the assessment</span>
+            <em data-i18n>Findings and the action plan open from the results.</em></div>
         </div>
       </div>
 
@@ -117,12 +152,12 @@
 
         <div class="metric-grid">
           <div class="metric-card"><span class="metric-label" data-i18n>Policies</span><span class="metric-value" id="ovMetricPolicies">—</span><span class="metric-note" id="ovMetricPoliciesNote"></span></div>
-          <div class="metric-card is-action" data-goto="remediation"><span class="metric-label" data-i18n>Needs action</span><span class="metric-value" id="ovMetricAction">—</span><span class="metric-note">policies with a recommended change</span></div>
-          <div class="metric-card is-critical" data-goto="severity" data-fnd-goto="policies" data-sev="1"><span class="metric-label" data-i18n>Critical</span><span class="metric-value" id="ovMetricCritical">—</span><span class="metric-note">disable now — counted inside Needs action</span></div>
-          <div class="metric-card" data-goto="severity" data-fnd-goto="unreachable"><span class="metric-label" data-i18n>Shadowed</span><span class="metric-value" id="ovMetricUnreachable">—</span><span class="metric-note" id="ovMetricUnreachableNote">unreachable — never match traffic</span></div>
+          <div class="metric-card is-action" data-goto="remediation"><span class="metric-label" data-i18n>Needs action</span><span class="metric-value" id="ovMetricAction">—</span><span class="metric-note" data-i18n>policies with a recommended change</span></div>
+          <div class="metric-card is-critical" data-goto="severity" data-fnd-goto="policies" data-sev="1"><span class="metric-label" data-i18n>Critical</span><span class="metric-value" id="ovMetricCritical">—</span><span class="metric-note" data-i18n>highest severity — all need action (some may appear under Unreachable below)</span></div>
+          <div class="metric-card" data-goto="severity" data-fnd-goto="unreachable"><span class="metric-label" data-i18n>Shadowed</span><span class="metric-value" id="ovMetricUnreachable">—</span><span class="metric-note" id="ovMetricUnreachableNote" data-i18n>unreachable — never match traffic</span></div>
           <!-- 판정하지 못한 정책을 카드로 세워 두지 않으면, 옆의 "Needs action"이
                전체 작업량인 것처럼 읽힌다. 못 센 것도 결과의 일부다. -->
-          <div class="metric-card" data-goto="severity" data-fnd-goto="policies" data-sev="0"><span class="metric-label" data-i18n>Not judged</span><span class="metric-value" id="ovMetricUnknown">—</span><span class="metric-note" id="ovMetricUnknownNote">excluded from the counts above</span></div>
+          <div class="metric-card" data-goto="severity" data-fnd-goto="policies" data-sev="0"><span class="metric-label" data-i18n>Not judged</span><span class="metric-value" id="ovMetricUnknown">—</span><span class="metric-note" id="ovMetricUnknownNote" data-i18n>excluded from the counts above</span></div>
         </div>
 
         <div class="ov-grid">
@@ -149,63 +184,145 @@
     <section id="analysisView" class="page-view hidden">
       <div class="view-head">
         <h1 data-i18n>Sources</h1>
-        <p data-i18n>Bring in the configuration and the usage statistics the assessment runs on. Collect straight
-           from the device, or import files on an air-gapped network — the analysis is identical.</p>
+        <p data-i18n>Bring in the configuration and the per-policy hit count / last used history the assessment
+           runs on. Either path below feeds the same analysis — the results are identical.</p>
       </div>
 
-      <details id="collectDetails" class="glass-card" style="margin-bottom:16px;padding:16px 20px">
-        <summary style="cursor:pointer;font-weight:600">Collect from device instead of uploading files (optional)</summary>
-        <p class="sev-guide-note" style="margin-top:10px" data-i18n>Connect to a FortiGate over its REST API and pull the configuration, hit-count / last-used stats, and FQDN resolutions in one step — no file exports needed. <strong>A read-only API token is enough</strong> (this only reads; it never changes the device). Prefer the file-upload path on air-gapped networks. The token is kept in memory only, never written to disk.</p>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-          <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">FortiGate IP / host
-            <input type="text" id="collIp" class="sev-user-range-input" placeholder="10.0.0.1" /></label>
-          <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Port
-            <input type="number" id="collPort" class="sev-user-range-input" value="443" style="width:90px" /></label>
-          <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">API token (read-only)
-            <input type="password" id="collToken" class="sev-user-range-input" placeholder="REST API key" /></label>
-          <label class="inline-status" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="collSkipSsl" /> Skip TLS verification (trusted network only)</label>
-          <button type="button" id="collectBtn" class="primary-btn" data-i18n>Collect from device</button>
-          <!-- ISDB·geography는 아직 파서가 없다. 실물 응답을 보기 전에 형식을
-               추정해 만들면 첫 실사용에서 깨진다(v85에서 실제로 그랬다).
-               이 버튼은 어떤 경로가 무엇을 주는지만 확인한다. -->
-          <button type="button" id="probeBtn" class="secondary-btn" data-i18n>Check ISDB / geography support</button>
-        </div>
-        <div class="inline-status" id="collectStatus" style="margin-top:8px"></div>
-        <pre id="probeResult" class="ap-cli" style="display:none;margin-top:10px;max-height:280px;overflow:auto"></pre>
-      </details>
+      <!-- 두 경로는 결과가 같으므로 시각적 무게도 같아야 한다. 장비 수집을
+           "(optional)" 접힘에 두면 파일 업로드가 기본처럼 읽힌다 — 실제로는
+           장비 수집이 세 자료를 한 번에 가져오는 더 쉬운 길이다. -->
+      <div class="src-choose">
+        <article class="src-opt">
+          <div class="src-opt-head"><h2 data-i18n>Collect from the device</h2><em data-i18n>recommended</em></div>
+          <p class="src-opt-desc" data-i18n>Pulls everything over the FortiGate REST API in one step — no export files to prepare.</p>
+          <ul class="src-opt-list">
+            <li data-i18n>config — all policies and objects</li>
+            <li data-i18n>hit count / last used — per-policy usage history</li>
+            <li data-i18n>FQDN resolutions — the domain → IP answers the device has cached</li>
+          </ul>
+          <div class="src-opt-form">
+            <div class="src-opt-row">
+              <!-- 라벨 안에 입력칸이 섞여 있으므로 **텍스트만** 감싼다.
+                   label 에 data-i18n 을 붙이면 textContent 를 갈아 끼우면서
+                   입력칸이 통째로 사라진다. -->
+              <label class="inline-status src-field" style="flex:2"><span data-i18n>FortiGate IP / host</span>
+                <input type="text" id="collIp" class="sev-user-range-input" placeholder="10.0.0.1" /></label>
+              <label class="inline-status src-field" style="flex:0 0 90px"><span data-i18n>Port</span>
+                <input type="number" id="collPort" class="sev-user-range-input" value="443" /></label>
+            </div>
+            <label class="inline-status src-field"><span data-i18n>API token (read-only)</span>
+              <!-- autocomplete off — 브라우저 암호 관리자가 토큰 저장을 권하면
+                   "메모리에만 둔다"는 바로 아래 안내가 거짓이 된다. -->
+              <input type="password" id="collToken" class="sev-user-range-input" data-i18n-ph placeholder="REST API key" autocomplete="off" /></label>
+            <label class="inline-status" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="collSkipSsl" /> <span data-i18n>Skip TLS verification (trusted network only)</span></label>
+            <!-- ISDB/geography 진단 버튼은 파서 개발용 도구라 UI에서 뺐다(v104).
+                 실물 형태가 더 필요하면 /api/collect/probe를 지원 절차로 쓴다. -->
+            <button type="button" id="collectBtn" class="primary-btn" data-i18n>Collect from device</button>
+          </div>
+          <div class="inline-status" id="collectStatus" style="margin-top:8px"></div>
+          <p class="src-opt-note" data-i18n>A read-only API token is enough — this only reads and never changes the device. The token stays in memory and is never written to disk.</p>
+        </article>
 
-      <div class="quick-upload analysis-upload upload-3col">
-        <div class="quick-upload-card">
-          <div>
-            <strong>Config File</strong>
-            <span id="selectedConfigName" class="file-name">No file selected</span>
+        <article class="src-opt">
+          <div class="src-opt-head"><h2 data-i18n>Import files</h2></div>
+          <p class="src-opt-desc" data-i18n>For air-gapped networks where the device cannot be reached directly. Export these from the device beforehand.</p>
+          <ul class="src-opt-list">
+            <li data-i18n>config file — the full configuration (.conf / .txt)</li>
+            <li data-i18n>Firewall Policy CSV — hit count / last used per firewall policy</li>
+            <li data-i18n>Proxy Policy CSV — only for devices that use proxy policies</li>
+          </ul>
+          <!-- 순서가 곧 안전장치다: 설정 파일을 올려야 장비가 등록되고, 그
+               장비에만 CSV가 붙는다. CSV 버튼을 처음부터 열어두면 어느 장비의
+               통계인지 화면도 서버도 모른 채 얹히게 된다(Jayden 설계). -->
+          <div class="src-file-row" style="margin-bottom:10px">
+            <button type="button" id="wizardOpenBtn" class="primary-btn" data-i18n>Register a device — guided</button>
+            <span class="file-name" data-i18n>config → CSV → ranges → FQDN, one step at a time</span>
           </div>
-          <button type="button" id="configPickerBtn" class="primary-btn" data-i18n>Config File</button>
-          <input type="file" id="configFile" name="config_file" accept=".conf,.txt" hidden />
-        </div>
-        <div class="quick-upload-card">
-          <div>
-            <strong>Firewall Policy CSV</strong>
-            <span id="selectedFwCsvName" class="file-name">No file selected</span>
+          <!-- 대역 입력의 상시 입구는 점검 결과 화면에 산다(재실행 편의) —
+               준비 단계인 이 화면에서도 갈 수 있어야 첫 사용자가 헤매지
+               않는다(2026-08-25 전면 검토 M-6). -->
+          <div class="src-file-row" style="margin-bottom:10px">
+            <button type="button" class="secondary-btn" data-goto="severity" data-i18n>User IP ranges are set on the Findings screen</button>
+            <span class="file-name" data-i18n>Set them once here — they are saved with this device.</span>
           </div>
-          <button type="button" id="fwCsvPickerBtn" class="secondary-btn" data-i18n>FW Policy CSV</button>
-          <input type="file" id="fwPolicyCsvFile" accept=".csv,.txt" hidden />
-        </div>
-        <div class="quick-upload-card">
-          <div>
-            <strong>Proxy Policy CSV</strong>
-            <span id="selectedProxyCsvName" class="file-name">No file selected</span>
+          <!-- 등록한 장비를 여기서 바로 바꾼다. 전환 입구가 '고객사·장비'
+               화면에만 있으면, 여러 장비를 오가며 대역을 넣는 컨설턴트가 매번
+               다른 화면을 경유해야 한다(라운드 19 지적). -->
+          <div class="src-file-row" id="deviceSwitchRow" style="margin-bottom:10px;display:none">
+            <label class="file-name" for="deviceSwitch" data-i18n>Open a registered device</label>
+            <select id="deviceSwitch" class="sev-user-range-input" style="max-width:340px"></select>
           </div>
-          <button type="button" id="proxyCsvPickerBtn" class="secondary-btn" data-i18n>Proxy Policy CSV</button>
-          <input type="file" id="proxyPolicyCsvFile" accept=".csv,.txt" hidden />
-        </div>
+          <div class="src-opt-form">
+            <div class="src-file-row">
+              <button type="button" id="configPickerBtn" class="primary-btn" data-i18n>Config File</button>
+              <span id="selectedConfigName" class="file-name" data-i18n>No file selected</span>
+            </div>
+            <input type="file" id="configFile" name="config_file" accept=".conf,.txt" hidden />
+            <div id="csvStep" class="src-csv-step">
+              <div class="src-csv-hint" id="csvStepHint" data-i18n>Add the configuration first — the usage CSV is then attached to that device.</div>
+              <div class="src-file-row">
+                <button type="button" id="fwCsvPickerBtn" class="secondary-btn" disabled data-i18n>FW Policy CSV</button>
+                <span id="selectedFwCsvName" class="file-name" data-i18n>No file selected</span>
+              </div>
+              <input type="file" id="fwPolicyCsvFile" accept=".csv,.txt" hidden />
+              <div class="src-file-row">
+                <button type="button" id="proxyCsvPickerBtn" class="secondary-btn" disabled data-i18n>Proxy Policy CSV</button>
+                <span id="selectedProxyCsvName" class="file-name" data-i18n>No file selected</span>
+              </div>
+              <input type="file" id="proxyPolicyCsvFile" accept=".csv,.txt" hidden />
+              <!-- 통계는 언제나 합쳐진다. 되돌릴 수단이 없으면 잘못 올린 CSV의
+                   유일한 복구가 '장비 삭제 후 재등록'이 된다. -->
+              <div class="src-file-row">
+                <button type="button" id="csvClearBtn" class="secondary-btn" disabled
+                        data-i18n>Clear usage data for this device</button>
+                <span id="csvClearStatus" class="file-name"></span>
+              </div>
+            </div>
+          </div>
+          <p class="src-opt-note" data-i18n>Config alone still runs the assessment, but without hit count and last used no policy can be called unused.</p>
+        </article>
       </div>
+
+      <!-- 일괄 보고 (MSP 전용). 비MSP에게도 잠금 상태로 보여준다 — 제품 안에서
+           티어 차이를 볼 수 있어야 비교가 성립한다(가격·티어 인라인 원칙, v73/v77).
+           서버가 티어를 강제하므로 이 노출은 안내일 뿐 권한이 아니다. -->
+      <article class="panel" id="batchPanel">
+        <div class="panel-head">
+          <h2 data-i18n>Batch report</h2>
+          <span class="panel-hint" data-i18n>MSP / Consultant — one workbook per device, downloaded as a zip</span>
+        </div>
+        <div class="panel-body">
+          <p class="sev-guide-note" style="margin-top:0" data-i18n>Select all files in one go — they pair up by name:</p>
+          <ul class="sev-guide-note" style="margin:6px 0 10px 18px;line-height:1.7">
+            <li><code>X.conf</code> / <code>X.txt</code> — <span data-i18n>the configuration (required)</span></li>
+            <li><code>X.csv</code> — <span data-i18n>firewall hit count / last used for that device</span></li>
+            <li><code>X.proxy.csv</code> — <span data-i18n>the same for proxy policies</span></li>
+            <li><code>X.ranges.txt</code> — <span data-i18n>its user IP ranges, one CIDR or IP per line (labels and #, ;, ! or // comments are fine)</span></li>
+          </ul>
+          <p class="sev-guide-note" data-i18n>Up to 50 devices and 50 MB per batch. Files matching no pattern are skipped, and SUMMARY.txt in the zip lists every device and everything skipped. Each device is analysed in isolation with your current thresholds — devices are never mixed into one workbook. FQDN policies need the single-device flow (they require a device connection).</p>
+          <div id="batchLocked" class="src-file-row" style="display:none">
+            <span class="inline-status" style="text-align:left" data-i18n>Available with the MSP / Consultant license.</span>
+            <button type="button" id="batchSeeLicenseBtn" class="secondary-btn" data-i18n>See licence options</button>
+          </div>
+          <div id="batchControls" style="display:none">
+            <div class="src-file-row">
+              <button type="button" id="batchPickBtn" class="primary-btn" data-i18n>Select files</button>
+              <span id="batchPickInfo" class="file-name" data-i18n>No files selected</span>
+            </div>
+            <input type="file" id="batchFiles" multiple accept=".conf,.txt,.csv" hidden />
+            <div class="src-file-row" style="margin-top:10px">
+              <button type="button" id="batchRunBtn" class="primary-btn" disabled data-i18n>Build batch reports</button>
+              <span id="batchStatus" class="inline-status" style="text-align:left"></span>
+            </div>
+          </div>
+        </div>
+      </article>
 
       <section class="summary-grid">
         <article class="glass-card">
           <div class="section-heading">
             <div><span class="section-index" data-i18n>01</span><h2 data-i18n>Config Summary</h2></div>
-            <span id="configStatus" class="inline-status">Load a FortiGate config file.</span>
+            <span id="configStatus" class="inline-status" data-i18n>Load a FortiGate config file.</span>
           </div>
           <div id="metaBox" class="summary-stats"></div>
           <div id="downloadBox" class="link-row"></div>
@@ -213,7 +330,7 @@
         <article class="glass-card">
           <div class="section-heading">
             <div><span class="section-index" data-i18n>02</span><h2 data-i18n>Policy CSV Summary</h2></div>
-            <span id="policyStatsStatus" class="inline-status">Import GUI policy CSV to merge Last Used, Hit Count, and Status.</span>
+            <span id="policyStatsStatus" class="inline-status" data-i18n>Import GUI policy CSV to merge Last Used, Hit Count, and Status.</span>
           </div>
           <div id="policyCsvSummary" class="summary-stats summary-stats-compact"></div>
         </article>
@@ -221,7 +338,7 @@
 
       <section class="workspace-card">
         <div class="workspace-topbar">
-          <div class="search-wrap"><input type="search" id="tableFilter" placeholder="Search within the current tab..." /></div>
+          <div class="search-wrap"><input type="search" id="tableFilter" data-i18n-ph placeholder="Search within the current tab..." /></div>
           <div class="toolbar-actions">
             <button type="button" id="downloadCsvBtn" class="secondary-btn" data-i18n>Download Current Tab CSV</button>
             <button type="button" id="downloadWorkbookBtn" class="secondary-btn secondary-btn-soft" data-i18n>Download All Tabs Excel</button>
@@ -229,12 +346,12 @@
           </div>
         </div>
         <div id="policyOnlyFilters" class="filter-row hidden">
-          <label class="filter-pill"><input type="checkbox" id="filterDisabled" /> Disabled only</label>
+          <label class="filter-pill"><input type="checkbox" id="filterDisabled" /> <span data-i18n>Disabled only</span></label>
           <label class="filter-pill"><input type="checkbox" id="filterHitZero" /> Hit Count = 0</label>
-          <label class="filter-pill"><input type="checkbox" id="filterDormantYear" /> Last Used &gt; 1 year</label>
-          <label class="filter-pill"><input type="checkbox" id="filterExpiredSchedule" /> Expired schedule</label>
-          <label class="filter-pill"><input type="checkbox" id="filterNoItsRequest" /> No ticket ID</label>
-          <label class="filter-pill filter-pill-accent"><input type="checkbox" id="filterDeletable" /> Removal candidate</label>
+          <label class="filter-pill"><input type="checkbox" id="filterDormantYear" /> <span data-i18n>Last Used &gt; 1 year</span></label>
+          <label class="filter-pill"><input type="checkbox" id="filterExpiredSchedule" /> <span data-i18n>Expired schedule</span></label>
+          <label class="filter-pill"><input type="checkbox" id="filterNoItsRequest" /> <span data-i18n>No ticket ID</span></label>
+          <label class="filter-pill filter-pill-accent"><input type="checkbox" id="filterDeletable" /> <span data-i18n>Removal candidate</span></label>
         </div>
         <div class="tabs">
           <button class="tab-btn active" data-tab="firewall_policy" data-i18n>Firewall Policy</button>
@@ -263,17 +380,17 @@
       <article class="glass-card" style="margin-bottom:20px;padding:20px">
         <div class="section-heading">
           <div><span class="section-index" data-i18n>Setup</span><h2 data-i18n>User IP ranges</h2></div>
-          <span class="inline-status">Severity 1/2/7 can be assessed without IP ranges. Adding ranges enables full classification.</span>
+          <span class="inline-status" data-i18n>Severity 1/2/7 can be assessed without IP ranges. Adding ranges enables full classification.</span>
         </div>
         <div class="sev-user-range-row">
-          <input type="text" id="sevRangeInput" class="sev-user-range-input" placeholder="CIDR (e.g. 10.99.240.0/21)" />
+          <input type="text" id="sevRangeInput" class="sev-user-range-input" data-i18n-ph placeholder="CIDR (e.g. 10.99.240.0/21)" />
           <button type="button" id="sevRangeAddBtn" class="secondary-btn" data-i18n>Add</button>
           <button type="button" id="sevRangeImportBtn" class="secondary-btn" data-i18n>Import from File</button>
           <input type="file" id="sevRangeImportFile" accept=".txt,.csv" hidden />
-          <button type="button" id="sevClassifyBtn" class="primary-btn" data-i18n>Classify</button>
+          <button type="button" id="sevClassifyBtn" class="primary-btn" data-i18n>Run assessment</button>
         </div>
         <div id="sevRangeTags" class="sev-user-range-tags"></div>
-        <div class="inline-status" id="sevClassifyStatus">Please load a Config file first.</div>
+        <div class="inline-status" id="sevClassifyStatus" data-i18n>Please load a Config file first.</div>
       </article>
 
       <div class="fnd-panel" data-fnd-panel="policies">
@@ -282,6 +399,10 @@
           <div><span class="section-index" data-i18n>Results</span><h2 data-i18n>Severity Classification Results</h2></div>
           <button type="button" id="sevExportBtn" class="secondary-btn" data-i18n>Export to Excel</button>
         </div>
+        <!-- 총계는 상태바 칩에만 있어 이 패널만 보면 모수를 알 수 없었다 —
+             정책·판정·표시 세 수를 패널 상단에 한 줄로 둔다(집계값을 읽어
+             표시만 한다 — 판정 로직과 무관). -->
+        <p id="fndTotals" class="inline-status" style="margin:0 0 10px"></p>
         <div id="sevSummaryBar" class="sev-summary-bar"></div>
       </article>
 
@@ -290,6 +411,15 @@
           <button class="sev-subtab-btn active" data-sev-tab="firewall" data-i18n>Firewall Policy</button>
           <button class="sev-subtab-btn" data-sev-tab="proxy" data-i18n>Proxy Policy</button>
         </div>
+        <!-- **고지 위치가 틀렸다.** "메뉴와 설명만 번역됩니다" 는 설정 화면에만
+             있는데, 처음 쓰는 고객은 설정에 안 간다. 자기가 상사에게 낼
+             산출물이 영어라는 사실을 **결과를 보는 자리에서** 알아야 한다
+             (8라운드 F1). 판정 사유·권고 조치를 영어로 두는 이유도 함께
+             적는다 — 모르면 "번역이 덜 됐다" 로 읽힌다. -->
+        <p class="sev-guide-note" id="sevLangNote" data-i18n>Judgement reasons and
+          recommended actions stay in English so that the screen and the Excel
+          report use the same words — you can find on the report exactly what you
+          saw here. Menus and descriptions follow your language.</p>
         <div id="sevTableContent" class="sev-table-wrap"></div>
       </article>
       </div>
@@ -300,12 +430,14 @@
           <div><span class="section-index" data-i18n>Unreachable</span><h2 data-i18n>Unreachable Policy Detection</h2></div>
           <span class="inline-status" id="sevReachCoverage"></span>
         </div>
-        <p class="sev-guide-note" style="margin-top:0" data-i18n>A policy is listed here only when a single always-on policy above it <strong>provably matches every packet</strong> it could match (source, destination, service, and interfaces all contained) — so it never takes effect. Conservative static analysis: policies using geography / ISDB / user objects or negation are skipped, not guessed. Routing and NAT are not considered.</p>
+        <!-- 아래 안내문들은 data-i18n을 달지 않는다 — i18n.apply()는 textContent를 통째로
+     바꾸므로 <strong>·<br>·자식 span이 조용히 사라진다. 사전 키도 없어 번역되지도 않았다. -->
+        <p class="sev-guide-note" style="margin-top:0" data-i18n-rich>A policy is listed here only when a single always-on policy above it <strong>provably matches every packet</strong> it could match (source, destination, service, and interfaces all contained) — so it never takes effect. Conservative static analysis: policies using geography / ISDB / user objects or negation are skipped, not guessed. Routing and NAT are not considered.</p>
         <div class="sev-user-range-row" style="flex-wrap:wrap;align-items:center">
-          <button type="button" id="fqdnFetchBtn" class="primary-btn">Include FQDN policies — fetch from connected device</button>
+          <button type="button" id="fqdnFetchBtn" class="primary-btn" data-i18n>Include FQDN policies — fetch from connected device</button>
           <button type="button" id="fqdnDumpBtn" class="secondary-btn" data-i18n>or upload DNS cache dump</button>
           <input type="file" id="fqdnDumpFile" accept=".txt,.log" hidden />
-          <span id="fqdnDumpStatus" class="inline-status">If you collected from the device, FQDN resolutions are already included. Otherwise fetch them from a connected device, or upload the output of <code>diagnose test application dnsproxy 6</code>. Either way the results are re-classified automatically and marked "DNS capture" (provable as of capture time).</span>
+          <span id="fqdnDumpStatus" class="inline-status" data-i18n-rich>If you collected from the device, FQDN resolutions are already included. Otherwise fetch them from a connected device, or upload the output of <code>diagnose test application dnsproxy 6</code>. Either way the results are re-classified automatically and marked "DNS capture" (provable as of capture time).</span>
         </div>
         <div id="sevReachContent" class="sev-table-wrap"></div>
       </article>
@@ -318,7 +450,7 @@
           <button type="button" id="advisorRunBtn" class="primary-btn" data-i18n>Analyze</button>
         </div>
         <div id="advisorVersionBox" class="summary-stats" style="min-height:40px"></div>
-        <div id="advisorStatus" class="inline-status" style="margin-top:8px">Load a Config File and click Analyze.</div>
+        <div id="advisorStatus" class="inline-status" style="margin-top:8px" data-i18n>Load a Config File and click Analyze.</div>
       </article>
 
       <article class="glass-card" id="advisorResultCard" style="padding:20px;display:none">
@@ -327,7 +459,7 @@
         <!-- CVE 섹션 -->
         <div class="advisor-section">
           <div class="advisor-section-title">
-            <span class="advisor-icon">🔴</span> Active CVEs
+            <span class="advisor-icon">🔴</span> <span data-i18n>Active CVEs</span>
             <span class="advisor-badge-count" id="advisorCveCount"></span>
           </div>
           <div id="advisorCveTable"></div>
@@ -336,7 +468,7 @@
         <!-- 업그레이드 수정 섹션 -->
         <div class="advisor-section" style="margin-top:28px">
           <div class="advisor-section-title">
-            <span class="advisor-icon">🔧</span> Fixes Available in Newer Versions
+            <span class="advisor-icon">🔧</span> <span data-i18n>Fixes Available in Newer Versions</span>
             <span class="advisor-badge-count" id="advisorFixCount"></span>
           </div>
           <div id="advisorFixTable"></div>
@@ -345,7 +477,7 @@
         <!-- Known Issues 섹션 -->
         <div class="advisor-section" style="margin-top:28px">
           <div class="advisor-section-title">
-            <span class="advisor-icon">⚠️</span> Known Issues in Current Version
+            <span class="advisor-icon">⚠️</span> <span data-i18n>Known Issues in Current Version</span>
             <span class="advisor-badge-count" id="advisorKnownCount"></span>
           </div>
           <div id="advisorKnownTable"></div>
@@ -366,6 +498,12 @@
       <article class="panel" id="apPanel">
         <div class="panel-head">
           <h2 data-i18n>Prioritised work list</h2>
+          <!-- **체크박스가 조치 버튼으로 읽혔다.** 이 목록이 먼저 보이는데
+               행마다 체크박스가 있으니, API 적용을 쓰는 사용자가 "여기서
+               조치하는 건가" 하고 멈춘다(Jayden 실사용 지적). 아래 '적용'
+               체크박스와 생김새가 같은데 하는 일은 정반대다 — 여기 것은
+               종이 체크리스트고, 장비로는 아무것도 나가지 않는다. -->
+          <span class="panel-hint" data-i18n>tick these off as you do the work by hand — nothing is sent to the device from here</span>
           <div class="panel-actions">
             <span class="panel-hint" id="apProgress"></span>
             <button type="button" id="apResetBtn" class="secondary-btn" data-i18n>Clear checkmarks</button>
@@ -374,12 +512,12 @@
         <div id="apEmpty" class="empty-state"><strong data-i18n>No assessment yet.</strong><span data-i18n>Run the assessment on the Findings page to build a work list.</span></div>
         <!-- 엑셀 Action Plan 시트에는 이 경고가 있는데 화면 복사 버튼에는 없었다.
              VDOM을 먼저 지정하지 않으면 붙여넣은 명령이 다른 VDOM에 들어간다. -->
-        <p id="apCliNote" class="sev-guide-note" style="margin:0 20px 4px">On multi-VDOM devices, enter the policy's VDOM first (<code>config vdom</code> / <code>edit &lt;name&gt;</code>) before running these commands. Review each change with the policy owner — disabling is reversible, deletion is not.</p>
+        <p id="apCliNote" class="sev-guide-note" style="margin:0 20px 4px" data-i18n-rich>On multi-VDOM devices, enter the policy's VDOM first (<code>config vdom</code> / <code>edit &lt;name&gt;</code>) before running these commands. Review each change with the policy owner — disabling is reversible, deletion is not.</p>
         <div id="apGroups" class="ap-groups"></div>
       </article>
 
       <details class="panel panel-collapsible">
-        <summary><h2 data-i18n>Apply changes over the API</h2><span class="panel-hint" data-i18n>optional — disables policies directly on the device</span></summary>
+        <summary><h2 data-i18n>Apply changes over the API</h2><span class="panel-hint" data-i18n>lets APO disable the chosen policies on the device — skip it if you apply changes by hand</span></summary>
         <div class="panel-body">
       <article class="glass-card" id="remDeviceCard" style="margin-bottom:20px;padding:24px">
         <div class="section-heading">
@@ -387,11 +525,13 @@
           <span id="remDeviceStatus" class="inline-status"></span>
         </div>
         <div class="rem-device-form">
-          <label class="rem-label">IP Address<input id="remIp" type="text" class="rem-input" placeholder="192.168.1.1"></label>
-          <label class="rem-label">Port<input id="remPort" type="number" class="rem-input rem-input-sm" value="443"></label>
+          <!-- 라벨 안에 입력칸이 있으므로 텍스트만 감싼다(감싸지 않고 label 에
+               data-i18n 을 붙이면 입력칸이 통째로 사라진다). -->
+          <label class="rem-label"><span data-i18n>IP Address</span><input id="remIp" type="text" class="rem-input" placeholder="192.168.1.1"></label>
+          <label class="rem-label"><span data-i18n>Port</span><input id="remPort" type="number" class="rem-input rem-input-sm" value="443"></label>
           <label class="rem-label">VDOM<input id="remVdom" type="text" class="rem-input rem-input-sm" placeholder="root" value="root"></label>
-          <label class="rem-label">API Token<input id="remToken" type="password" class="rem-input rem-input-lg" placeholder="API access token"></label>
-          <label class="rem-label rem-label-check" title="Only enable this for a device with a self-signed certificate. While enabled, the API token is sent over a connection that is not authenticated."><input id="remSkipSsl" type="checkbox"> Skip SSL Verify <span class="rem-warn">(insecure)</span></label>
+          <label class="rem-label"><span data-i18n>API Token</span><input id="remToken" type="password" class="rem-input rem-input-lg" data-i18n-ph placeholder="API access token"></label>
+          <label class="rem-label rem-label-check" title="Only enable this for a device with a self-signed certificate. While enabled, the API token is sent over a connection that is not authenticated."><input id="remSkipSsl" type="checkbox"> <span data-i18n>Skip SSL Verify</span> <span class="rem-warn" data-i18n>(insecure)</span></label>
           <div class="rem-device-actions">
             <button id="remSaveBtn" class="primary-btn" data-i18n>Save Device</button>
             <button id="remTestBtn" class="secondary-btn" data-i18n>Test Connection</button>
@@ -413,43 +553,46 @@
 
         <!-- Active candidates: shared Select All bar -->
         <div id="remActiveHeader" style="display:none;margin-bottom:12px">
-          <div class="rem-section-header" style="border-bottom:none;margin-bottom:0">
-            <span id="remSelectedCount" class="rem-selected-count">0 / 0 selected</span>
-            <label class="rem-check-all-label" style="margin-left:auto"><input type="checkbox" id="remCheckAll"> Select All</label>
+          <div class="rem-section-header" style="border-bottom:none;margin-bottom:0;gap:10px">
+            <span id="remSelectedCount" class="rem-selected-count" data-i18n>0 / 0 selected</span>
+            <!-- 하나의 필터 컨트롤(2026-08-24 Jayden 재지적 — 자유 검색창과
+                 컬럼 필터 드롭다운은 같은 일의 중복이었고 후자는 클릭해야
+                 보였다): 컬럼 선택(기본 '전체' = 종전 자유 검색)과 값 입력을
+                 상시 노출. Enter/추가로 조건을 칩으로 고정하면 AND 로 쌓인다.
+                 선택(체크)은 필터와 무관하게 유지된다. -->
+            <select id="remFilterCol" class="sev-user-range-input" style="max-width:150px;margin-left:auto;padding:8px 10px;font-size:13px"></select>
+            <input type="search" id="remSearch" class="sev-user-range-input" style="max-width:240px" data-i18n-ph placeholder="filter — commas mean 'any of these' (498, 499)" />
+            <button type="button" id="remFilterAdd" class="secondary-btn" data-i18n>Add</button>
+            <span id="remFilterChips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span>
+            <label class="rem-check-all-label"><input type="checkbox" id="remCheckAll"> <span data-i18n>Select All</span></label>
           </div>
         </div>
 
         <div id="remCriticalSection" style="display:none">
-          <div class="rem-section-header">
+          <div class="rem-section-header rem-collapsible" data-rem-body="remCriticalBody" style="cursor:pointer">
+            <span class="rem-caret" style="display:inline-block;width:14px">▾</span>
             <span class="rem-section-label rem-label-critical">Critical</span>
             <span id="remCriticalCount" class="rem-section-count" style="margin-left:8px"></span>
-            <span class="rem-section-desc" style="margin-left:8px">Disable, then monitor 30–90 days before removing</span>
+            <span class="rem-section-desc" style="margin-left:8px" data-i18n>Disable, then monitor 30–90 days before removing</span>
           </div>
-          <div class="rem-table-wrap">
+          <div class="rem-table-wrap" id="remCriticalBody">
             <table class="rem-table" id="remCriticalTable">
-              <thead><tr>
-                <th style="width:40px"></th>
-                <th>ID</th><th>Type</th><th>Name</th><th>Risk</th>
-                <th>Source IP</th><th>Destination IP</th><th>Service</th><th>Schedule</th><th>Reason</th>
-              </tr></thead>
+              <thead><tr data-rem-head="check"></tr></thead>
               <tbody></tbody>
             </table>
           </div>
         </div>
 
         <div id="remHighSection" style="display:none;margin-top:20px">
-          <div class="rem-section-header">
+          <div class="rem-section-header rem-collapsible" data-rem-body="remHighBody" style="cursor:pointer">
+            <span class="rem-caret" style="display:inline-block;width:14px">▾</span>
             <span class="rem-section-label rem-label-high">High</span>
             <span id="remHighCount" class="rem-section-count" style="margin-left:8px"></span>
-            <span class="rem-section-desc" style="margin-left:8px">Review candidate — confirm before removing</span>
+            <span class="rem-section-desc" style="margin-left:8px" data-i18n>Review candidate — confirm before removing</span>
           </div>
-          <div class="rem-table-wrap">
+          <div class="rem-table-wrap" id="remHighBody">
             <table class="rem-table" id="remHighTable">
-              <thead><tr>
-                <th style="width:40px"></th>
-                <th>ID</th><th>Type</th><th>Name</th><th>Risk</th>
-                <th>Source IP</th><th>Destination IP</th><th>Service</th><th>Schedule</th><th>Reason</th>
-              </tr></thead>
+              <thead><tr data-rem-head="check"></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -457,17 +600,15 @@
 
         <!-- Already disabled -->
         <div id="remDisabledSection" style="display:none;margin-top:28px">
-          <div class="rem-section-header">
-            <span class="rem-section-label rem-label-disabled">Already Disabled</span>
+          <div class="rem-section-header rem-collapsible" data-rem-body="remDisabledBody" style="cursor:pointer">
+            <span class="rem-caret" style="display:inline-block;width:14px">▾</span>
+            <span class="rem-section-label rem-label-disabled" data-i18n>Already Disabled</span>
             <span id="remDisabledCount" class="rem-section-count" style="margin-left:8px"></span>
-            <span class="rem-section-desc" style="margin-left:12px">Already inactive in config — no API action needed</span>
+            <span class="rem-section-desc" style="margin-left:12px" data-i18n>Already inactive in config — no API action needed</span>
           </div>
-          <div class="rem-table-wrap">
+          <div class="rem-table-wrap" id="remDisabledBody">
             <table class="rem-table" id="remDisabledTable">
-              <thead><tr>
-                <th>ID</th><th>Type</th><th>Name</th><th>Risk</th>
-                <th>Source IP</th><th>Destination IP</th><th>Service</th><th>Schedule</th><th>Reason</th>
-              </tr></thead>
+              <thead><tr data-rem-head="plain"></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -477,7 +618,13 @@
       <article class="glass-card hidden" id="remResultCard" style="padding:24px;margin-bottom:20px">
         <div class="section-heading">
           <div><span class="section-index" data-i18n>Results</span><h2 data-i18n>Apply Results</h2></div>
+          <!-- **되돌릴 수 없는 쓰기의 기록이 이 화면에만 있었다.** 새로고침하면
+               사라지는데, 감사에서 가장 먼저 요구하는 산출물이 이것이다.
+               파일에는 화면 표에 없는 두 가지가 더 들어간다 — 적용 시각과
+               대상 장비 시리얼(이름은 두 고객이 같은 것을 쓸 수 있다). -->
+          <button type="button" id="remExportApplyBtn" class="secondary-btn" data-i18n>Save results as CSV</button>
         </div>
+        <p class="sev-guide-note" style="margin-top:0" data-i18n>These results are not stored — save them now if you need them for the change record.</p>
         <div id="remResultBody"></div>
       </article>
         </div>
@@ -485,7 +632,7 @@
 
       <div id="remModal" class="rem-modal-backdrop hidden">
         <div class="rem-modal">
-          <h3 class="rem-modal-title">Confirm Policy Disable</h3>
+          <h3 class="rem-modal-title" data-i18n>Confirm Policy Disable</h3>
           <p id="remModalMsg" class="rem-modal-msg"></p>
           <div class="rem-modal-actions">
             <button id="remModalCancel" class="secondary-btn" data-i18n>Cancel</button>
@@ -498,64 +645,78 @@
     <!-- ══ AUDIT & EVIDENCE ═══════════════════════════════════════════ -->
     <section id="diffView" class="page-view hidden">
       <div class="view-head">
-        <h1 data-i18n>Audit &amp; evidence</h1>
-        <p data-i18n>What changed between configurations, the evidence record for a periodic review, and a way to
-           measure how accurate these judgements actually are on your firewall.</p>
+        <!-- 사이드바는 'Change review' 인데 제목이 'Audit & evidence' 였다.
+             옆 메뉴에 같은 이름의 화면(Evidence)이 따로 있어, 들어온 사람이
+             '잘못 들어왔나' 로 읽었다(라운드 29 지적). 설명도 이 화면에 없는
+             두 기능을 광고하고 있었다 — 메뉴 이름과 같게 하고, 여기 있는
+             것만 말한다. -->
+        <h1 data-i18n>Change review</h1>
+        <p data-i18n>What changed between two configuration backups of the same firewall — policies
+           added, removed or modified, and object-level differences. For the periodic review record
+           and accuracy measurement, use Evidence.</p>
       </div>
 
       <article class="glass-card diff-card">
         <div class="section-heading">
           <div><span class="section-index" data-i18n>Configuration Drift Analysis</span><h2 data-i18n>Configuration Change Review</h2></div>
-          <span id="diffStatus" class="inline-status">Upload two FortiGate config backups to compare configuration changes.</span>
+          <span id="diffStatus" class="inline-status" data-i18n>Upload two FortiGate config backups to compare configuration changes.</span>
         </div>
 
         <div class="diff-hero-panel">
           <div>
-            <div class="diff-eyebrow">Change Review Workspace</div>
-            <p>Compare a baseline configuration against a target configuration to identify policy additions, deletions, modified settings, object changes, and other configuration areas that may require review.</p>
+            <p data-i18n>Compare a baseline configuration against a target configuration to identify policy additions, deletions, modified settings, object changes, and other configuration areas that may require review.</p>
           </div>
-          <div class="diff-method-card"><span>Comparison Basis</span><strong>FortiGate Config Backup</strong></div>
+          <div class="diff-method-card"><span data-i18n>Comparison Basis</span><strong data-i18n>FortiGate Config Backup</strong></div>
         </div>
 
         <div class="diff-upload-grid">
           <div class="diff-upload-tile">
-            <div><strong>Baseline Configuration</strong><span id="selectedOldConfigName" class="file-name dark-file-name">No file selected</span></div>
+            <div><strong data-i18n>Baseline Configuration</strong><span id="selectedOldConfigName" class="file-name dark-file-name" data-i18n>No file selected</span></div>
             <button type="button" id="oldConfigPickerBtn" class="secondary-btn" data-i18n>Choose Baseline</button>
             <input type="file" id="oldConfigFile" accept=".conf,.txt" hidden />
           </div>
           <div class="diff-upload-tile">
-            <div><strong>Target Configuration</strong><span id="selectedNewConfigName" class="file-name dark-file-name">No file selected</span></div>
+            <div><strong data-i18n>Target Configuration</strong><span id="selectedNewConfigName" class="file-name dark-file-name" data-i18n>No file selected</span></div>
             <button type="button" id="newConfigPickerBtn" class="secondary-btn" data-i18n>Choose Target</button>
             <input type="file" id="newConfigFile" accept=".conf,.txt" hidden />
           </div>
-          <div class="diff-upload-actions"><button type="button" id="runDiffBtn" class="primary-btn" data-i18n>Analyze Configuration Changes</button></div>
+          <!-- 비교 결과를 파일로 남길 수 있어야 한다. 화면의 before/after 가
+               어떤 산출물에도 안 실려, '무엇을 검토했나'에 답할 수 없었다
+               (백로그 B-29). 비교를 돌리기 전에는 숨긴다. -->
+          <div class="diff-upload-actions">
+            <button type="button" id="runDiffBtn" class="primary-btn" data-i18n>Analyze Configuration Changes</button>
+            <button type="button" id="diffExportBtn" class="secondary-btn hidden" data-i18n>Download comparison (Excel)</button>
+          </div>
         </div>
 
         <div id="diffProgress" class="diff-progress hidden">
           <div class="diff-progress-header">
-            <strong id="diffProgressTitle">Preparing analysis...</strong>
+            <strong id="diffProgressTitle" data-i18n>Preparing analysis...</strong>
             <span id="diffProgressPercent">0%</span>
           </div>
           <div class="diff-progress-track">
             <div id="diffProgressBar" class="diff-progress-bar" style="width: 0%"></div>
           </div>
-          <div id="diffProgressStep" class="diff-progress-step">Waiting for files.</div>
+          <div id="diffProgressStep" class="diff-progress-step" data-i18n>Waiting for files.</div>
         </div>
 
         <div class="diff-result-layout">
           <aside class="diff-category-panel">
-            <div class="diff-category-title">Change Categories</div>
+            <div class="diff-category-title" data-i18n>Change Categories</div>
             <button class="diff-category-btn active" data-diff-tab="overview" data-i18n>Overview</button>
             <button class="diff-category-btn" data-diff-tab="added_policies" data-i18n>Added Policies</button>
             <button class="diff-category-btn" data-diff-tab="removed_policies" data-i18n>Removed Policies</button>
             <button class="diff-category-btn" data-diff-tab="changed_policies" data-i18n>Changed Policies</button>
             <button class="diff-category-btn" data-diff-tab="added_objects" data-i18n>Added Objects</button>
             <button class="diff-category-btn" data-diff-tab="removed_objects" data-i18n>Removed Objects</button>
+            <!-- 객체 '내용' 변경은 어느 탭에도 없었다 — 주소 객체를 0.0.0.0/0
+                 으로 넓혀도 '변경 0건'이었다(라운드 45). -->
+            <button class="diff-category-btn" data-diff-tab="changed_objects" data-i18n>Redefined Objects</button>
             <button class="diff-category-btn" data-diff-tab="other_changes" data-i18n>Other Configuration Changes</button>
           </aside>
           <div class="diff-result-panel">
             <div id="diffSummary" class="summary-stats diff-summary-grid"></div>
-            <div id="diffTabContent"><div class="empty-state"><strong>No comparison result yet.</strong><span data-i18n>Select two configuration files and run the analysis.</span></div></div>
+            <div id="diffTabContent"><div class="empty-state"><strong data-i18n>No comparison result yet.</strong><span data-i18n>Select two configuration files and run the analysis.</span></div></div>
           </div>
         </div>
       </article>
@@ -564,6 +725,250 @@
 
 
     <!-- ══ EVIDENCE ═══════════════════════════════════════════════════ -->
+    <section id="iprefView" class="page-view hidden">
+      <div class="view-head">
+        <h1 data-i18n>Config migration</h1>
+        <p class="mig-ip-only" data-i18n>Before you change an interface IP or move a subnet, find every place the old range is still referenced — including the sections a policy report never shows you.</p>
+        <p class="mig-dev-only hidden" data-i18n>Moving this configuration to a different model. APO matches the interface layout and everything that names it — it does not translate settings between firmware versions.</p>
+      </div>
+
+      <article class="glass-card diff-card" style="margin-top:20px">
+        <div class="section-heading">
+          <div><span class="section-index" data-i18n>Step 1</span>
+               <h2 data-i18n>What are you changing?</h2></div>
+          <span class="inline-status" data-i18n>Read-only. Nothing is changed.</span>
+        </div>
+        <p class="mig-ip-only sev-guide-note" style="margin-top:0" data-i18n-rich>The device refuses to change an address while something still references it — <strong>Command fail. Return code -23</strong>. The official answer is to delete every reference, change it, then rebuild them, which leaves a hole in your policy while you work. Editing the configuration file changes the value and all of its references in one step.</p>
+
+        <div class="sev-user-range-row" style="flex-wrap:wrap">
+          <label class="inline-status"><input type="radio" name="migScope" id="migScopeIp" value="ip" checked />
+            <span data-i18n>IP address or range</span></label>
+          <label class="inline-status">
+            <input type="radio" name="migScope" id="migScopeDev" value="device" />
+            <span data-i18n>Move to another device (different model or version)</span></label>
+        </div>
+
+        <div class="sev-user-range-row mig-ip-only" style="flex-wrap:wrap;margin-top:6px">
+          <label class="inline-status" for="iprefTarget" data-i18n>Old IP or range</label>
+          <input type="text" id="iprefTarget" class="text-input" style="min-width:280px"
+                 placeholder="10.1.2.0/24  ·  10.1.2.0 255.255.255.0  ·  10.1.2.1-10.1.2.30" />
+          <button type="button" id="iprefRunBtn" class="primary-btn" data-i18n>Find references</button>
+          <span id="iprefStatus" class="inline-status"></span>
+        </div>
+
+        <div id="iprefResult" class="hidden mig-ip-only" style="margin-top:18px">
+          <div id="iprefWarn" class="hidden"></div>
+          <div id="iprefRecon" class="sev-guide-note" style="margin-top:0"></div>
+          <div class="sev-user-range-row" style="flex-wrap:wrap;margin-top:10px">
+            <button type="button" id="iprefToggleBtn" class="secondary-btn" data-i18n>Show every reference</button>
+            <label class="inline-status hidden" id="iprefOnlyMustWrap">
+              <input type="checkbox" id="iprefOnlyMust" checked />
+              <span data-i18n>Show only what must change</span></label>
+          </div>
+          <div class="table-wrap hidden" id="iprefTableWrap" style="margin-top:10px">
+            <table class="data-table" id="iprefTable">
+              <thead><tr>
+                <th>Line</th><th>Where</th><th>Field</th>
+                <th>Value</th><th>Why it matched</th><th>Action</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </article>
+
+
+      <article class="glass-card diff-card hidden" id="devCard" style="margin-top:20px">
+        <div class="section-heading">
+          <div><span class="section-index" data-i18n>Step 2</span>
+               <h2 data-i18n>Which device are you moving to?</h2></div>
+          <span class="inline-status" data-i18n>Read-only. Nothing is changed.</span>
+        </div>
+        <p class="sev-guide-note" style="margin-top:0" data-i18n-rich><strong>Match the firmware version first.</strong> This step moves the interface layout and everything that names it — it does not translate settings between versions. Bring the new device to the same version as this one, then take a backup from it and upload it here. A factory-default backup is enough. <strong>Your encrypted settings are not touched</strong>; they are carried over exactly as they are.</p>
+        <div class="sev-user-range-row" style="flex-wrap:wrap">
+          <input type="file" id="devFile" accept=".conf,.txt" />
+          <button type="button" id="devUploadBtn" class="primary-btn" data-i18n>Read the new device</button>
+          <span id="devUploadStatus" class="inline-status"></span>
+        </div>
+        <div id="devPreflight" class="hidden" style="margin-top:16px"></div>
+      </article>
+
+      <article class="glass-card diff-card hidden" id="devMapCard" style="margin-top:20px">
+        <div class="section-heading">
+          <div><span class="section-index" data-i18n>Step 3</span>
+               <h2 data-i18n>Match each interface to one on the new device</h2></div>
+          <span class="inline-status" data-i18n>Pick from the ports the new device has spare.</span>
+        </div>
+        <p class="sev-guide-note" style="margin-top:0" data-i18n-rich>Every policy, address object and route that names an interface moves with it. Leave a row blank to keep that name — but if the new device has no such port, the settings that use it will not load.</p>
+        <div class="table-wrap" style="margin-top:10px">
+          <table class="data-table" id="devMapTable">
+            <thead><tr>
+              <th>On this device</th><th>On the new device</th>
+              <th>References</th><th>Where</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="devMapNote" class="hidden" style="margin-top:10px"></div>
+        <div class="sev-user-range-row" style="flex-wrap:wrap;margin-top:12px">
+          <label class="inline-status hidden" id="devUnmappedWrap">
+            <input type="checkbox" id="devConfirmUnmapped" />
+            <span data-i18n>I know some interfaces have no match, and I want the file anyway.</span></label>
+          <label class="inline-status hidden" id="devPartialWrap">
+            <input type="checkbox" id="devConfirmPartial" />
+            <span data-i18n>I understand the configuration was not read to the end</span></label>
+        </div>
+        <div class="sev-user-range-row" style="flex-wrap:wrap;margin-top:10px">
+          <button type="button" id="devBuildBtn" class="primary-btn" data-i18n>Build the config file</button>
+          <span id="devBuildStatus" class="inline-status"></span>
+        </div>
+        <div id="devResult" class="hidden" style="margin-top:16px"></div>
+
+        <!-- 변경내역은 파일을 만들 때 워크북(.xlsx)으로 함께 내려간다. 여기
+             버튼은 **표 한 장만 기계가 읽어야 할 때**를 위한 것이다(ITSM·CMDB
+             import, 스크립트 대사) — IP 개번 쪽과 같은 규칙이다. 감사 제출은
+             워크북이다(절이 넷이라 CSV 한 장에 안 들어간다).
+             파일을 만들기 전에는 숨긴다: 받은 것이 없는데 "한 장 더"를 권하면
+             무엇의 CSV 인지 알 수 없다. -->
+        <div class="sev-user-range-row hidden" id="devCsvWrap" style="margin-top:10px">
+          <button type="button" id="devCsvBtn" class="secondary-btn" data-i18n>Download the change list as CSV</button>
+          <span class="inline-status" data-i18n>For importing into another system. The workbook (.xlsx) is the one to file.</span>
+        </div>
+      </article>
+      <article class="glass-card diff-card" id="migCard" style="margin-top:20px">
+        <div class="section-heading">
+          <div><span class="section-index" data-i18n>Step 2</span>
+               <h2 data-i18n>Map each address to its new value</h2></div>
+          <span class="inline-status" data-i18n>Nothing is written to the device.</span>
+        </div>
+
+        <div id="migEmpty" class="sev-guide-note" data-i18n>Search a range above to list the addresses you need to map.</div>
+
+        <div id="migBody" class="hidden">
+          <div class="sev-user-range-row" style="flex-wrap:wrap">
+            <button type="button" id="migExportBtn" class="secondary-btn" data-i18n>Download the address list (CSV)</button>
+            <button type="button" id="migPasteToggle" class="secondary-btn" data-i18n>Paste a list</button>
+            <button type="button" id="migPlanBtn" class="primary-btn" data-i18n>Preview the changes</button>
+            <span id="migStatus" class="inline-status"></span>
+          </div>
+
+          <!-- **`window.prompt` 은 쓰면 안 된다.** Chrome 의 prompt 는 한 줄짜리
+               입력이라 붙여넣을 때 개행이 공백으로 뭉개진다 — 실측에서 20행을
+               붙여넣으면 1행만 반영되고 아무 안내도 없었다. 139개를 넣는 유일한
+               경로가 그것이었다. 여러 줄을 받는 자리를 화면에 둔다. -->
+          <div id="migPasteBox" class="hidden" style="margin-top:10px">
+            <p class="sev-guide-note" style="margin-top:0" data-i18n>Two columns per line — the current address, then the new one. Tab, comma or spaces all work. Leave the second column empty to retire an address.</p>
+            <textarea id="migPasteText" class="text-input" rows="6"
+                      style="width:100%;font-family:monospace"
+                      placeholder="208.97.24.214&#9;11.11.11.214&#10;208.97.24.215&#9;11.11.11.215"></textarea>
+            <div class="sev-user-range-row" style="flex-wrap:wrap;margin-top:6px">
+              <button type="button" id="migPasteApply" class="primary-btn" data-i18n>Fill the table</button>
+              <span id="migPasteStatus" class="inline-status"></span>
+            </div>
+            <div id="migPasteBad" class="hidden" style="margin-top:6px"></div>
+          </div>
+
+          <div id="migCapped" class="hidden sev-guide-note"></div>
+          <div id="migUnmapped" class="hidden"></div>
+          <div class="table-wrap" style="margin-top:10px">
+            <table class="data-table" id="migTable">
+              <thead><tr>
+                <th>AS-IS</th><th>TO-BE</th><th>References</th><th>Must change</th><th>Where</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </article>
+
+      <article class="glass-card diff-card" id="migPlanCard" style="margin-top:20px">
+        <div class="section-heading">
+          <div><span class="section-index" data-i18n>Step 3</span>
+               <h2 data-i18n>Check what will change</h2></div>
+          <span class="inline-status" data-i18n>Read-only — edit in step 2.</span>
+        </div>
+        <div id="migPlanEmpty" class="sev-guide-note" data-i18n>Fill in the new values above and preview the changes.</div>
+
+        <div id="migPlanBody" class="hidden">
+          <div id="migPlanWarn" class="hidden"></div>
+          <div id="migPlanRecon" class="sev-guide-note" style="margin-top:0"></div>
+          <div class="sev-user-range-row" style="flex-wrap:wrap;margin-top:10px">
+            <label class="inline-status"><input type="checkbox" id="migOnlyChanged" checked />
+              <span data-i18n>Show only rows that change</span></label>
+            <label class="inline-status"><input type="checkbox" id="migConfirmUnmapped" />
+              <span data-i18n>I confirm the unmapped addresses are being retired</span></label>
+            <label class="inline-status"><input type="checkbox" id="migConfirmCollisions" />
+              <span data-i18n>I confirm the duplicate values are intended</span></label>
+            <!-- 파서가 끝까지 못 읽었을 때만 보인다(`migShowPartial`). 장비 이관의
+                 `devPartialWrap` 과 같은 이유 — 멀쩡한 config 옆에 붙는 늑대소년이
+                 실제로 광고 영상에 찍혔다(2026-09-23). -->
+            <label class="inline-status hidden" id="migPartialWrap"><input type="checkbox" id="migConfirmPartial" />
+              <span data-i18n>I understand the configuration was not read to the end</span></label>
+            <button type="button" id="migBuildBtn" class="primary-btn" data-i18n>Build the config file</button>
+              <span id="migBuildStatus" class="inline-status"></span>
+          </div>
+          <div class="table-wrap" style="margin-top:10px">
+            <table class="data-table" id="migPlanTable">
+              <thead><tr>
+                <th>Line</th><th>Where</th><th>AS-IS</th><th>TO-BE</th><th>Action</th><th>Why</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <!-- 객체 이름은 **따로 둔다.** 위 표는 IP 한 줄 한 줄의 변경이고,
+               이건 객체 하나의 정체성이 바뀌는 일이다. 한 행에 둘을 섞으면
+               승인자가 무엇을 승인하는지 흐려진다(2026-09-15 설계 결정).
+               번호로 식별되는 정책·정적라우트는 여기 나오지 않는다 — 서버가
+               `edit` 의 따옴표 유무로 가른다. -->
+          <details id="migNameCard" class="hidden" style="margin-top:14px">
+            <summary class="sev-guide-note" style="cursor:pointer">
+              <strong data-i18n>Rename objects (optional)</strong>
+              <span id="migNameCount" class="inline-status"></span>
+            </summary>
+            <p class="sev-guide-note" data-i18n>Leave a box empty to keep the name as it is. When you rename an object, every policy and group that points at it follows automatically.</p>
+            <p class="sev-guide-note" data-i18n>The old name is not replaced inside comments and descriptions — those are notes for people, not settings.</p>
+            <div class="table-wrap" style="margin-top:8px">
+              <table class="data-table" id="migNameTable">
+                <thead><tr>
+                  <th>AS-IS</th><th>TO-BE</th><th>Where</th><th>Used by</th>
+                </tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      </article>
+
+      <article class="glass-card diff-card" id="migApplyCard" style="margin-top:20px">
+        <div class="section-heading">
+          <div><span class="section-index" data-i18n>Step 4</span>
+               <h2 data-i18n>Put it on the device</h2></div>
+          <span class="inline-status" data-i18n>APO does not touch the device.</span>
+        </div>
+        <div id="migApplyEmpty" class="sev-guide-note" data-i18n>Build the file in step 3 first.</div>
+
+        <div id="migApplyBody" class="hidden">
+          <div id="migApplySummary" class="sev-guide-note" style="margin-top:0"></div>
+
+          <!-- 변경내역은 Build 때 워크북(.xlsx)으로 이미 내려간다. 여기 버튼은
+               **표 한 장만 기계가 읽어야 할 때**를 위한 것이다(ITSM·CMDB
+               import, 스크립트 대사). 감사 제출은 워크북 쪽이다 — 절이 넷이라
+               CSV 한 장에 안 들어간다. -->
+          <div class="sev-user-range-row" style="margin-top:10px">
+            <button type="button" id="migCsvBtn" class="secondary-btn" data-i18n>Download the change list as CSV</button>
+            <span class="inline-status" data-i18n>For importing into another system. The workbook (.xlsx) is the one to file.</span>
+          </div>
+
+          <p class="sev-guide-note" data-i18n-rich><strong>Restoring a configuration reboots the device by default.</strong> Setting <strong>reboot-upon-config-restore</strong> to disable avoids the immediate reboot, but a manual reboot is still required for the configuration to take effect fully — the downtime moves, it does not disappear. Plan a maintenance window.</p>
+
+          <ol class="sev-guide-note" id="migApplySteps" style="margin-top:0"></ol>
+
+          <p class="sev-guide-note" data-i18n-rich><strong>Offline checks cannot see everything.</strong> Even the device's own pre-commit validation misses constraints that only appear at commit time. Treat the plan as a well-founded proposal, not a guarantee.</p>
+        </div>
+      </article>
+    </section>
+
     <section id="evidenceView" class="page-view hidden">
       <div class="view-head">
         <h1 data-i18n>Evidence</h1>
@@ -574,13 +979,13 @@
       <article class="glass-card diff-card" style="margin-top:20px">
         <div class="section-heading">
           <div><span class="section-index" data-i18n>Audit Trail</span><h2 data-i18n>Ruleset Review Evidence</h2></div>
-          <span class="inline-status">PCI-DSS v4.0 Req 1.2.7 — review NSC configurations at least every six months</span>
+          <span class="inline-status" data-i18n>PCI-DSS v4.0 Req 1.2.7 — review NSC configurations at least every six months</span>
         </div>
-        <p class="sev-guide-note" style="margin-top:0" data-i18n>Upload two or more config snapshots (<strong>oldest first</strong> — FortiGate configs carry no backup timestamp, so the order you provide is the order recorded). APO builds a change timeline between snapshots and exports a <strong>Review Evidence</strong> workbook: each snapshot's SHA-256, changes per interval, the PCI-DSS citation, and a reviewer sign-off block. Collect snapshots with whatever you already use — Oxidized, FortiManager revisions, manual backups.</p>
+        <p class="sev-guide-note" style="margin-top:0" data-i18n-rich>Upload two or more config snapshots (<strong>oldest first</strong> — FortiGate configs carry no backup timestamp, so the order you provide is the order recorded). APO builds a change timeline between snapshots and exports a <strong>Review Evidence</strong> workbook: each snapshot's SHA-256, changes per interval, the PCI-DSS citation, and a reviewer sign-off block. Collect snapshots with whatever you already use — Oxidized, FortiManager revisions, manual backups.</p>
         <div class="sev-user-range-row" style="flex-wrap:wrap">
           <button type="button" id="auditPickBtn" class="secondary-btn" data-i18n>Select snapshots (oldest first)</button>
           <input type="file" id="auditFiles" accept=".conf,.txt" multiple hidden />
-          <span id="auditFileNames" class="inline-status">No snapshots selected</span>
+          <span id="auditFileNames" class="inline-status" data-i18n>No snapshots selected</span>
           <button type="button" id="auditRunBtn" class="primary-btn" data-i18n>Build timeline</button>
           <button type="button" id="auditExportBtn" class="secondary-btn" style="display:none" data-i18n>Export Review Evidence (.xlsx)</button>
         </div>
@@ -591,9 +996,9 @@
       <article class="glass-card" id="sevVerifyCard" style="margin-bottom:20px;padding:20px;display:none">
         <div class="section-heading">
           <div><span class="section-index" data-i18n>Verify</span><h2 data-i18n>Accuracy Verification</h2></div>
-          <span class="inline-status">Free — verify APO's calls against your firewall before you trust them</span>
+          <span class="inline-status" data-i18n>Free — verify APO's calls against your firewall before you trust them</span>
         </div>
-        <p class="sev-guide-note" style="margin-top:0" data-i18n>Don't take this report on faith. APO draws a stratified sample across severity levels (up to ~31 policies), each with <strong>what to check</strong> and the <strong>exact CLI commands</strong> to run on your FortiGate. Fill in what you actually found and whether the call matched, then upload the sheet back — APO computes per-level precision. Held or unfilled rows are excluded from the denominator, never counted as right or wrong.</p>
+        <p class="sev-guide-note" style="margin-top:0" data-i18n-rich>Don't take this report on faith. APO draws a stratified sample across severity levels (up to 50 policies), each with <strong>what to check</strong> and the <strong>exact CLI commands</strong> to run on your FortiGate. Fill in what you actually found and whether the call matched, then upload the sheet back — APO computes per-level precision. Held or unfilled rows are excluded from the denominator, never counted as right or wrong.</p>
         <div class="sev-user-range-row" style="flex-wrap:wrap">
           <button type="button" id="verifySampleXlsxBtn" class="secondary-btn" data-i18n>Download sample worksheet (.xlsx)</button>
           <button type="button" id="verifySampleCsvBtn" class="secondary-btn" data-i18n>.csv</button>
@@ -602,6 +1007,57 @@
         </div>
         <div class="inline-status" id="verifyStatus"></div>
         <div id="verifyResult" class="sev-table-wrap" style="margin-top:12px"></div>
+      </article>
+    </section>
+
+    <!-- ══ CUSTOMERS & DEVICES ════════════════════════════════════════
+         등록한 장비를 고객사에 배정한다. 배정은 **보고서를 묶는 라벨**일 뿐
+         판정 입력이 아니다 — 어느 고객사에 넣었느냐로 심각도가 달라지면
+         설명할 수 없는 도구가 된다. -->
+    <section id="customersView" class="page-view hidden">
+      <div class="view-head">
+        <h1 data-i18n>Customers &amp; devices</h1>
+        <p data-i18n>Drag a device onto a customer to assign it. Assignment only groups the
+           reports — it never changes how a policy is judged. Each device keeps its own
+           configuration, usage data and IP ranges.</p>
+      </div>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2 data-i18n>Assign devices</h2>
+          <div class="panel-actions">
+            <input type="text" id="custNewName" class="sev-user-range-input"
+                   data-i18n-ph placeholder="New customer name" style="max-width:220px" />
+            <button type="button" id="custAddBtn" class="secondary-btn" data-i18n>Add customer</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="cust-grid">
+            <div>
+              <div class="cust-col-head" data-i18n>Customers</div>
+              <div id="custList" class="cust-list"></div>
+            </div>
+            <div>
+              <div class="cust-col-head" data-i18n>Unassigned devices</div>
+              <div id="devUnassigned" class="cust-list cust-drop" data-customer=""></div>
+            </div>
+          </div>
+          <div class="inline-status" id="custStatus" style="text-align:left;margin-top:12px"></div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2 data-i18n>Reports</h2>
+          <span class="panel-hint" data-i18n>one workbook per device, packaged as a zip</span>
+        </div>
+        <div class="panel-body">
+          <div class="src-file-row" style="flex-wrap:wrap">
+            <button type="button" id="repAllBtn" class="primary-btn" data-i18n>All devices</button>
+            <span class="inline-status" style="text-align:left" data-i18n>Reporting across devices needs the MSP / Consultant licence. A single device is always available from its row.</span>
+          </div>
+          <div class="inline-status" id="repStatus" style="text-align:left;margin-top:10px"></div>
+        </div>
       </article>
     </section>
 
@@ -619,54 +1075,194 @@
           <button type="button" id="sevThresholdToggle" class="secondary-btn" data-i18n>Show</button>
         </div>
         <div id="sevThresholdPanel" style="display:none">
-          <p class="sev-guide-note" style="margin-top:0" data-i18n><strong>Not sure what to set? Leave the defaults.</strong> They are sensible for most environments (365 days keeps once-a-year jobs like year-end batches from being flagged). These numbers exist as settings because no public standard defines them — they are your organization's audit criteria, not the tool's. Pick a preset or adjust individual values; changes apply the next time you click Classify. Active profile: <span id="sevProfileName">default</span>.</p>
+          <!-- 특히 이 문단: data-i18n이 자식 <span id="sevProfileName">을 벗겨내
+     프로파일명 갱신이 조용히 죽는 실버그였다 (리뷰 게이트 발견). -->
+          <p class="sev-guide-note" style="margin-top:0"><span data-i18n-rich><strong>Not sure what to set? Leave the defaults.</strong> They are sensible for most environments (365 days keeps once-a-year jobs like year-end batches from being flagged). These numbers exist as settings because no public standard defines them — they are your organization's audit criteria, not the tool's. Pick a preset or adjust individual values; changes apply the next time you click Classify.</span> <span data-i18n>Active profile:</span> <span id="sevProfileName">default</span>.</p>
+          <!-- 프리셋은 **8개 값 전부**를 담는다. dormancy 두 개만 바꾸던 동안
+               'Strict' 를 눌러도 hit 임계값·승인 유예는 그대로여서, 이름이
+               약속한 것을 지키지 못했다. 라벨 옆에 '누구에게 맞는가'를 적는다
+               (MS Defender·ESET 프리셋 관례). 값은 profiles/presets.yaml 한
+               곳에만 두고 서버가 내려준다 — HTML 속성에 또 적으면 두 곳이
+               갈린다(이 레포가 반복해 겪은 실패). -->
           <div class="sev-user-range-row" style="flex-wrap:wrap;margin-bottom:10px">
-            <span class="inline-status">Presets:</span>
-            <button type="button" class="secondary-btn th-preset" data-dorm="365" data-long="730" data-i18n>Standard — flag after 1 year unused</button>
-            <button type="button" class="secondary-btn th-preset" data-dorm="180" data-long="365" data-i18n>Strict — flag after 6 months</button>
-            <button type="button" class="secondary-btn th-preset" data-dorm="730" data-long="1460" data-i18n>Relaxed — flag after 2 years</button>
+            <span class="inline-status" data-i18n>Presets:</span>
+            <span id="thPresets" style="display:inline-flex;gap:8px;flex-wrap:wrap"></span>
             <button type="button" id="thResetBtn" class="secondary-btn" data-i18n>Reset to profile defaults</button>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 20px">
-            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Dormancy period (days)
+          <!-- **값을 바꾸면 무엇이 달라지는지 그 자리에서 말한다.** 지금까지는
+               값만 받고 결과를 안 보여줘서, 고객이 "어떻게 넣어야 하는지
+               모르겠다"고 했다(2026-08-25 Jayden). NSPM 제품군에도 없는
+               기능인데, APO 는 config 가 로컬 메모리에 있어 왕복이 싸다. -->
+          <p id="thPreview" class="sev-guide-note th-preview hidden"></p>
+          <p id="thStaleNote" class="sev-guide-note th-stale hidden"><span data-i18n>These results are older than the settings above — the numbers on screen were produced with the previous values.</span>
+            <button type="button" id="thReclassifyBtn" class="mini-btn" data-i18n>Classify again now</button></p>
+          <!-- 임계값을 '무엇을 판정하는 값인가'로 묶고, 카드마다 쉬운 설명 +
+               구체 예시 + 영향 배지를 붙인다(2026-08-24 Jayden — 기준 설명을
+               더 쉽게, 가시성 좋게). id·속성은 전부 기존 그대로다. -->
+          <p class="sev-guide-note th-group-title" data-i18n>When is a policy considered unused?</p>
+          <div class="th-card-grid">
+            <label class="inline-status th-card"><span class="th-card-head"><span data-i18n>Dormancy period (days)</span><span class="th-badge" data-i18n>Affects: unused verdicts</span></span>
               <input type="number" id="thDormancy" class="sev-user-range-input th-input" min="1" max="3650" />
-              <span style="font-size:11px;color:var(--muted)">A policy last used longer ago than this is treated as no longer in use</span>
+              <span class="th-desc" data-i18n>If the last traffic was more than this many days ago, the policy is treated as no longer in use.</span>
+              <span class="th-example" data-i18n>e.g. 365 — a job that runs once a year (year-end batch) is still safe.</span>
+              <!-- **'기록 없음' 막대가 크면 이 값을 무엇으로 두든 판정이 안
+                   바뀐다.** 지금은 그 사실을 화면 어디에서도 알 수 없어서,
+                   사용자가 숫자만 만지작거리게 된다. 커트라인을 함께 그린다. -->
+              <span id="thDormHist" class="th-hist hidden"></span>
             </label>
-            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Long dormancy (days)
+            <label class="inline-status th-card"><span class="th-card-head"><span data-i18n>Long dormancy (days)</span><span class="th-badge" data-i18n>Affects: temporary-policy cleanup</span></span>
               <input type="number" id="thLongDormancy" class="sev-user-range-input th-input" min="1" max="7300" />
-              <span style="font-size:11px;color:var(--muted)">Beyond this, a temp policy becomes a removal candidate</span>
+              <span class="th-desc" data-i18n>A temporary (temp) policy unused for longer than this becomes a removal candidate.</span>
+              <span class="th-example" data-i18n>e.g. 730 — temp rules idle for two years are proposed for removal.</span>
             </label>
-            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Schedule age limit (years)
-              <input type="number" id="thSchedAge" class="sev-user-range-input th-input" min="1" max="20" />
-              <span style="font-size:11px;color:var(--muted)">Unused Server-Server policies with a schedule older than this are escalated</span>
+          </div>
+          <p class="sev-guide-note th-group-title" data-i18n>Exceptions that lower urgency</p>
+          <div class="th-card-grid">
+            <label class="inline-status th-card"><span class="th-card-head"><span data-i18n>Approval window (days)</span><span class="th-badge" data-i18n>Affects: Critical relief</span></span>
+              <input type="number" id="thApproval" class="sev-user-range-input th-input" min="0" max="3650" />
+              <span class="th-desc" data-i18n>A policy still inside its approved term is not marked Critical just because usage is unknown — it stays at review. APO reads the term from a one-time schedule or a date in the policy name/comment.</span>
+              <span class="th-example" data-i18n>e.g. 365 — a policy opened this year gets time to prove itself. 0 = off.</span>
             </label>
-            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Registration fallback year
-              <input type="number" id="thRegYear" class="sev-user-range-input th-input" min="2000" max="2100" placeholder="empty = skip" />
-              <span style="font-size:11px;color:var(--muted)">Assumed registration year when a policy name carries no date. Leave empty to skip age-based checks for those policies</span>
+          </div>
+          <p class="sev-guide-note th-group-title" data-i18n>Low-usage (hit count) checks</p>
+          <div class="th-card-grid">
+            <label class="inline-status th-card" style="justify-content:flex-start">
+              <span class="th-card-head"><span><input type="checkbox" id="thUseAbsHit" style="margin-right:6px" /><span data-i18n>Use absolute hit-count thresholds</span></span><span class="th-badge" data-i18n>Affects: low-usage verdicts</span></span>
+              <span class="th-desc" data-i18n>Judge "barely used" by absolute hit counts. Counters reset to zero on reboot or HA failover, so low counts are weak evidence — turn this off if your devices restart often.</span>
             </label>
-            <label class="inline-status" style="display:flex;flex-direction:column;gap:6px;justify-content:flex-start">
-              <span><input type="checkbox" id="thUseAbsHit" style="margin-right:6px" />Use absolute hit-count thresholds</span>
-              <span style="font-size:11px;color:var(--muted)">Off by default: hit counters reset on reboot/HA failover, so low counts are weak evidence</span>
-            </label>
-            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Server-User hit multiplier
+            <label class="inline-status th-card"><span class="th-card-head"><span data-i18n>Server-User hit multiplier</span><span class="th-badge" data-i18n>Affects: low-usage verdicts</span></span>
               <input type="number" id="thSuMult" class="sev-user-range-input th-input" min="1" max="100000" placeholder="e.g. 100" />
-              <span style="font-size:11px;color:var(--muted)">Low usage if hits &lt; (years since registration) × this value</span>
+              <span class="th-desc" data-i18n>A user-to-server policy is low-usage when total hits are below (years since registration) × this value.</span>
+              <span class="th-example" data-i18n>e.g. 100 — three years registered but under 300 hits is low usage.</span>
             </label>
-            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Server-Server hit threshold
+            <label class="inline-status th-card"><span class="th-card-head"><span data-i18n>Server-Server hit threshold</span><span class="th-badge" data-i18n>Affects: low-usage verdicts</span></span>
               <input type="number" id="thSsHit" class="sev-user-range-input th-input" min="1" max="1000000" placeholder="e.g. 50" />
-              <span style="font-size:11px;color:var(--muted)">Low usage if hits fall below this value</span>
+              <span class="th-desc" data-i18n>A server-to-server policy is low-usage when total hits are below this value.</span>
+            </label>
+<!-- 'Schedule age limit (years)' 입력은 뺐다. **판정에 쓰이지 않는다** —
+                 severity_engine 은 ss_schedule_age_years 를 읽기만 하고 비교하는
+                 코드가 어디에도 없다(라운드 45 에서 과거 스케줄 상향 분기가
+                 도달불가로 확인돼 제거됨. 사유 문구에서도 그때 빼냈다).
+                 그런데 이 카드만 남아 "이보다 오래된 미사용 서버간 정책은
+                 우선순위를 올립니다"라고 **거짓 설명**을 하고 있었고, 고객이
+                 1~20 을 넣어도 단 한 건도 재분류되지 않았다. 값을 받지 않는
+                 것이 유일하게 정직한 상태다. -->
+            <label class="inline-status th-card"><span class="th-card-head"><span data-i18n>Registration fallback year</span><span class="th-badge" data-i18n>Affects: low-usage verdicts</span></span>
+              <input type="number" id="thRegYear" class="sev-user-range-input th-input" min="2000" max="2100" data-i18n-ph placeholder="empty = skip" />
+              <span class="th-desc" data-i18n>When a policy name carries no date, assume this registration year for age checks. Leave empty to skip those checks for such policies.</span>
             </label>
           </div>
           <div id="brandingPanel" style="display:none;margin-top:16px;padding-top:12px;border-top:1px solid #e2e8f0">
-            <p class="sev-guide-note" style="margin-top:0" data-i18n><strong>Report branding</strong> (MSP / Consultant license) — exported reports carry your company name on the Summary page.</p>
+            <p class="sev-guide-note" style="margin-top:0" data-i18n-rich><strong>Report branding</strong> (MSP / Consultant license) — exported reports carry your company name on the Summary page.</p>
             <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-              <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Prepared by (your company)
+              <label class="inline-status" style="display:flex;flex-direction:column;gap:4px"><span data-i18n>Prepared by (your company)</span>
                 <input type="text" id="brandCompany" class="sev-user-range-input" maxlength="80" placeholder="e.g. Acme Security Consulting" /></label>
-              <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">Prepared for (client, optional)
+              <label class="inline-status" style="display:flex;flex-direction:column;gap:4px"><span data-i18n>Prepared for (client) — leave blank to omit</span>
                 <input type="text" id="brandFor" class="sev-user-range-input" maxlength="80" placeholder="e.g. Contoso Manufacturing" /></label>
               <button type="button" id="brandSaveBtn" class="secondary-btn" data-i18n>Save branding</button>
               <span id="brandStatus" class="inline-status"></span>
             </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2 data-i18n>Your object names</h2>
+          <span class="panel-hint" data-i18n>this device only</span>
+        </div>
+        <div class="panel-body">
+          <!-- 명명 관례는 조직마다 다르다. 이 목록이 코드와 납품 프로파일에만
+               있던 동안, 새 고객은 자기 환경을 APO 에 말할 방법이 없었다 —
+               아무 값도 일치하지 않아 예외가 통째로 안 걸리거나, 두 글자 값이
+               단어 속에 우연히 걸렸다(실 설정에서 17건). 이제 입력받고,
+               **무엇이 걸리는지 그 자리에서 보여준다.** -->
+          <p class="sev-guide-note" style="margin-top:0" data-i18n-rich>Type the text that
+             appears <strong>inside your address object names</strong> — not the whole name,
+             just the part that identifies it. Entering <code>DMZ</code> matches
+             <code>DMZ_WEB_01</code> and <code>OA_DMZ_ZONE</code>. Every organisation names
+             these differently, so APO cannot guess yours. <strong>They are checked in the
+             order below and the first match wins</strong>, so a name that fits two rows is
+             judged by the higher one. The preview under each box shows exactly what it
+             catches in the configuration you have open.</p>
+          <div id="objRulesRows"></div>
+          <div class="sev-user-range-row" style="margin-top:10px">
+            <button type="button" id="objRulesSaveBtn" class="secondary-btn" data-i18n>Save object names</button>
+            <span id="objRulesStatus" class="inline-status"></span>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2 data-i18n>Ticket number format</h2>
+          <span class="panel-hint" data-i18n>kept on this computer</span>
+        </div>
+        <div class="panel-body">
+          <!-- 이 값이 프로파일 파일에만 있던 동안, 파일을 exe 옆에 놓아 주지
+               않은 배포에서는 이름에 티켓 번호가 박혀 있어도 **전량 '티켓
+               없음'** 으로 판정됐다(실 설정 1,525건 중 802건이 그랬다).
+               정규식을 그대로 받지 않는 이유는 runtime_settings.py 머리말 참조 —
+               접두어에서 안전한 패턴을 조립한다. -->
+          <p class="sev-guide-note" style="margin-top:0" data-i18n-rich>APO reads the
+             ITSM ticket number from each policy to tell <strong>approved policies from
+             undocumented ones</strong>. Every organisation numbers tickets differently,
+             so tell APO what yours look like. The preview shows how many policies in the
+             configuration you have open would be recognised.</p>
+          <div class="sev-user-range-row" style="align-items:flex-end;flex-wrap:wrap;gap:12px">
+            <label class="inline-status" style="display:flex;flex-direction:column;gap:4px">
+              <span data-i18n>What do your ticket numbers start with?</span>
+              <input type="text" id="ticketPrefixes" class="sev-user-range-input"
+                     maxlength="200" placeholder="RITM, CHG, REQ" /></label>
+            <label class="inline-status" style="display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="ticketScanComment" checked />
+              <span data-i18n>Also look in the policy comment</span></label>
+          </div>
+          <!-- **정규식 직접 입력 칸을 없앴다** (2026-09-11).
+               재비판 다섯 라운드 중 세 라운드의 주요 발견이 전부 이 입력에서
+               나왔고, 막을 때마다 다른 모양으로 뚫리면서 동시에 정상 패턴을
+               잘랐다. 실측: 실제 ITSM 형식 20종을 접두어만으로 20종 전부
+               잡는다(한글 접두어를 막던 제한을 함께 풀었다).
+               `app/services/runtime_settings.py` 의 `TICKET_REGEX_ENABLED`
+               로 되돌릴 수 있고, 검증자와 그 계약은 그대로 남아 있다.
+               서버도 `regex` 를 400 으로 거절한다 — 화면만 숨기면 옛
+               클라이언트가 계속 저장할 수 있다. -->
+          <div class="sev-user-range-row" style="margin-top:10px">
+            <button type="button" id="ticketSaveBtn" class="secondary-btn" data-i18n>Save ticket format</button>
+            <span id="ticketStatus" class="inline-status"></span>
+          </div>
+          <p id="ticketPreview" class="sev-guide-note" style="margin-bottom:0"></p>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2 data-i18n>Rule set</h2>
+          <span class="panel-hint" data-i18n>all your tuning in one file</span>
+        </div>
+        <div class="panel-body">
+          <!-- 임계값·객체 이름·티켓 형식은 세 카드에 흩어져 있고 저장소도
+               제각각(세션·장비 대장·디스크)이다. 한 파일로 묶으면 다른 장비·PC
+               에 그대로 옮기고(이식), SHA-256 으로 "이 판정이 어떤 기준이었나"를
+               증적에 고정한다. **판정은 바꾸지 않는다** — 지금 쓰는 값을 담을
+               뿐이다. -->
+          <p class="sev-guide-note" style="margin-top:0" data-i18n-rich>The thresholds,
+             object names and ticket format above are <strong>your</strong> judgement
+             criteria. Export them as one file to keep alongside a report, so the
+             record shows — with its <strong>SHA-256</strong> — exactly which criteria
+             that report was produced under. The same hash is printed on the report's
+             Summary sheet. Exporting reads your settings; it changes nothing.</p>
+          <div class="sev-user-range-row" style="align-items:center;flex-wrap:wrap;gap:12px">
+            <button type="button" id="rulesetExportBtn" class="secondary-btn" data-i18n>Export rule set</button>
+            <span id="rulesetStatus" class="inline-status"></span>
+          </div>
+          <!-- 화면에는 짧은 해시(앞 12자+…)만 보인다 — 64자가 줄을 채워 문단이
+               해시 한 줄로 읽혔다(고객 지적). 전체 값은 복사 버튼으로만 얻는다.
+               **리포트 Summary 시트의 해시는 서버가 전체 64자로 인쇄한다** —
+               여기 표시만 줄이는 것이고 감사 추적값은 그대로다. -->
+          <div class="ruleset-hash-row" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px">
+            <p id="rulesetHash" class="sev-guide-note" style="margin:0;font-family:monospace;word-break:break-all"></p>
+            <button type="button" id="rulesetHashCopyBtn" class="secondary-btn" data-i18n hidden>Copy full hash</button>
           </div>
         </div>
       </article>
@@ -692,7 +1288,7 @@
         <div class="panel-body">
           <p class="sev-guide-note" style="margin-top:0" data-i18n>Analysis, severity classification, unreachable detection, change review and accuracy verification are free. Exporting reports needs a one-time licence.</p>
           <div class="sev-user-range-row">
-            <span class="inline-status" id="setLicenseState">Checking…</span>
+            <span class="inline-status" id="setLicenseState" data-i18n>Checking…</span>
             <button type="button" id="setLicenseBtn" class="secondary-btn" data-i18n>Enter a licence key</button>
             <button type="button" id="setSampleBtn" class="secondary-btn" data-i18n>See a sample report</button>
           </div>
@@ -725,85 +1321,209 @@
                 <td><span class="sev-badge s7">7</span></td>
                 <td>None</td>
                 <td>Keep</td>
-                <td>① Action = Deny<br>② ICMP-only service (Ping, etc.)<br>③ Valid change ticket (ticket ID present + schedule not expired)<br>④ Policy name contains "controlled" (multi-firewall passthrough)<br>⑤ Policy matches a configured admin object <em>and carries no risky service</em></td>
-                <td>Two different meanings share this rating — see the <strong>Action</strong> column. <em>No risk</em> means assessed and found fine (deny, ICMP-only). <em>Not assessed (exempted)</em> means an exception rule stopped the assessment; it does not mean the policy is safe. An admin policy that still permits a risky service is rated 3, not 7</td>
+                <td data-i18n-rich>① Action = Deny<br>② ICMP-only service (Ping, etc.)<br>③ Valid change ticket (ticket ID present + schedule not expired)<br>④ Policy name contains "controlled" (multi-firewall passthrough)<br>⑤ Policy matches a configured admin object <em>and carries no risky service</em></td>
+                <td data-i18n-rich>Two different meanings share this rating — see the <strong>Action to Take</strong> column. <em>No risk</em> means assessed and found fine (deny, ICMP-only). <em>Not assessed (exempted)</em> means an exception rule stopped the assessment; it does not mean the policy is safe. An admin policy that still permits a risky service is rated 3, not 7</td>
               </tr>
               <tr class="sev-1">
                 <td><span class="sev-badge s1">1</span></td>
                 <td>Critical</td>
                 <td>Disable now</td>
-                <td>① Source, destination, <strong>and</strong> service are all Any/All<br>② Source or destination Any/All + Hit Count = 0<br>③ Source or destination Any/All + Hit Count &gt; 0 but Last Used ≥ 1 year<br>④ <strong>Risky service only</strong> (FTP, TELNET, TFTP, RLOGIN, RSH)<br>⑤ Risky + normal service <strong>mixed</strong> + Hit Count = 0 or Last Used ≥ 1 year<br>⑥ Temp keyword in name (temp, etc.) + no ticket ID + Hit Count = 0<br>⑦ Service ALL + Hit Count = 0 or Last Used ≥ 1 year</td>
-                <td>Disable, then monitor 30–90 days before removing</td>
+                <td data-i18n-rich>① Source, destination, <strong>and</strong> service are all Any/All<br>② Source or destination Any/All + Hit Count = 0<br>③ Source or destination Any/All + Hit Count &gt; 0 but Last Used ≥ 1 year<br>④ <strong>Risky service only</strong> (FTP, TELNET, TFTP, RLOGIN, RSH)<br>⑤ Risky + normal service <strong>mixed</strong> + Hit Count = 0 or Last Used ≥ 1 year<br>⑥ Temp keyword in name (temp, etc.) + no ticket ID + Hit Count = 0<br>⑦ Service ALL + Hit Count = 0 or Last Used ≥ 1 year</td>
+                <td data-i18n-rich>Disable, then monitor 30–90 days before removing</td>
               </tr>
               <tr class="sev-2">
                 <td><span class="sev-badge s2">2</span></td>
                 <td>High</td>
                 <td>Review candidate</td>
-                <td>① Status = Disabled<br>② Schedule expired (YYMMDD date is in the past)<br>③ Hit=0 + Accept + Server↔User + registered ≥ 1 year ago<br>④ Hit=0 + Accept + Server - Server + always schedule + &gt; 1 year</td>
-                <td>Confirm with the policy owner before removing. Already-disabled and expired policies are removal candidates; live but unused policies should be disabled and observed first</td>
+                <td data-i18n-rich>① Status = Disabled<br>② Schedule expired (YYMMDD date is in the past)<br>③ Hit=0 + Accept + Server↔User + registered ≥ 1 year ago<br>④ Hit=0 + Accept + Server - Server + always schedule + &gt; 1 year</td>
+                <td data-i18n-rich>Confirm with the policy owner before removing. Already-disabled and expired policies are removal candidates; live but unused policies should be disabled and observed first</td>
               </tr>
               <tr class="sev-3">
                 <td><span class="sev-badge s3">3</span></td>
                 <td>Medium</td>
                 <td>Additional Review Required</td>
-                <td>① Server - User + registered &gt; 1 year + Hit &lt; elapsed years×100 + <strong>Last Used ≥ 1 year</strong><br>② Risky + normal service <strong>mixed</strong> + <strong>actively used (within 1 year)</strong><br>③ Source/Destination Any·All + active use (within 1yr) + Server - User<br>④ Service ALL + active use (within 1yr) + Server - User</td>
-                <td>② Mixed risky policy: do NOT delete the entire rule — <strong>remove only the risky service/port</strong>, keep normal services</td>
+                <td data-i18n-rich>① Server - User + registered &gt; 1 year + Hit &lt; elapsed years×100 + <strong>Last Used ≥ 1 year</strong><br>② Risky + normal service <strong>mixed</strong> + <strong>actively used (within 1 year)</strong><br>③ Source/Destination Any·All + active use (within 1yr) + Server - User<br>④ Service ALL + active use (within 1yr) + Server - User</td>
+                <td data-i18n-rich>② Mixed risky policy: do NOT delete the entire rule — <strong>remove only the risky service/port</strong>, keep normal services</td>
               </tr>
               <tr class="sev-4">
                 <td><span class="sev-badge s4">4</span></td>
                 <td>Medium</td>
                 <td>Additional Review Required</td>
-                <td>① Server - Server + registered &gt; 2 years + Hit &lt; 50<br>② Server - Server + registration date unknown<br>③ Source/Destination Any·All + active use (within 1yr) + Server - Server<br>④ Service ALL + active use (within 1yr) + Server - Server</td>
-                <td>For active Any/All policies, recommend narrowing scope instead of immediate disable</td>
+                <td data-i18n-rich>① Server - Server + registered &gt; 2 years + Hit &lt; 50<br>② Server - Server + registration date unknown<br>③ Source/Destination Any·All + active use (within 1yr) + Server - Server<br>④ Service ALL + active use (within 1yr) + Server - Server</td>
+                <td data-i18n-rich>For active Any/All policies, recommend narrowing scope instead of immediate disable</td>
               </tr>
               <tr class="sev-5">
                 <td><span class="sev-badge s5">5</span></td>
                 <td>Low</td>
                 <td>Register ticket</td>
-                <td>① Server - User + registered &lt; 1 year + no ticket ID<br>② Server - User + registered &gt; 1 year + insufficient hits + <strong>Last Used &lt; 1 year</strong> (recently active but not formally registered)<br>③ Service ALL + active use (within 1yr) + Server - User</td>
-                <td>Keep the policy, but raise a change ticket so the access has an approval record</td>
+                <td data-i18n-rich>① Server - User + registered &lt; 1 year + no ticket ID<br>② Server - User + registered &gt; 1 year + insufficient hits + <strong>Last Used &lt; 1 year</strong> (recently active but not formally registered)<br>③ Service ALL + active use (within 1yr) + Server - User</td>
+                <td data-i18n>Keep the policy, but raise a change ticket so the access has an approval record</td>
               </tr>
               <tr class="sev-6">
                 <td><span class="sev-badge s6">6</span></td>
                 <td>Low</td>
                 <td>Register ticket</td>
-                <td>① AD/DNS/LDAP authentication service + Hit &gt; 0<br>② Server - Server + within 2 years + no ticket ID<br>③ Server - Server + Hit ≥ 50<br>④ A configured infrastructure or management object is included</td>
-                <td>Keep the policy, but raise a change ticket so the access has an approval record</td>
+                <td data-i18n-rich>① AD/DNS/LDAP authentication service + Hit &gt; 0<br>② Server - Server + within 2 years + no ticket ID<br>③ Server - Server + Hit ≥ 50<br>④ A configured infrastructure or management object is included</td>
+                <td data-i18n>Keep the policy, but raise a change ticket so the access has an approval record</td>
               </tr>
             </tbody>
           </table>
-          <p class="sev-guide-note" data-i18n>※ Without User IP ranges configured, traffic type (Server/User) cannot be determined — <strong>Severity 1, 2, and 7 can still be assessed without IP ranges</strong></p>
-          <p class="sev-guide-note" data-i18n>※ The periods in this table ("1 year", "2 years") describe the <strong>default thresholds</strong> (365 / 730 days). If you change them in Assessment Thresholds above, classification uses your values and each policy's Reason column shows the actual threshold applied.</p>
+          <p class="sev-guide-note" data-i18n-rich>※ Without User IP ranges configured, traffic type (Server/User) cannot be determined. <strong>Some Severity 1, 2 and 7 rules still apply</strong> (any/all policies, disabled policies, valid tickets), but every rule that depends on Server↔User direction is held back as &quot;not enough data&quot; — add your ranges for a full classification.</p>
+          <p class="sev-guide-note" data-i18n-rich><strong>Two exceptions sit above this table.</strong> A policy that only opens AD/DNS services (LDAP, Kerberos, DNS…) is graded 6 even with a wide source or destination, because domain controllers legitimately serve everyone. A policy that references one of your admin objects (MGMT, ADMIN…) is graded 6 or 3 rather than removed, because that access is needed. Neither exception applies when source, destination <em>and</em> service are all Any/All — that is an open policy, not an AD/DNS or admin policy.</p>
+          <!-- **표와 판정이 다른 숫자를 말하고 있었다.** 이 표의 기간은 기본값
+               고정인데 판정 사유(Reason)는 실제 값을 찍는다. 각주로 "위에서
+               바꾸면 당신 값을 씁니다"라고만 적어 두면, 감사자는 표를 보고
+               다른 기준을 읽는다. 지금 쓰는 값을 표 옆에 그대로 보여준다. -->
+          <p id="refActiveTh" class="sev-guide-note th-preview hidden"></p>
+          <p class="sev-guide-note" data-i18n-rich>※ The periods written in this table are the <strong>default thresholds</strong>. The line above shows what this session actually uses, and each policy's Reason column shows the threshold applied to that policy.</p>
         </div>
       </article>
     </section>
 
+  <!-- 푸터는 본문 컬럼 안(.app-body 내부)에 둔다. 밖에 두면 사이드바 sticky의
+       포함 블록이 푸터 위에서 끝나, 맨 아래로 스크롤할 때 푸터 높이만큼
+       메뉴가 화면 위로 밀려났다(실사용 지적 1의 잔여 원인). -->
+  <footer class="footer-signature">
+    <div class="footer-product">Audit &amp; Policy Optimizer <span class="apo-mark-dark">(APO)</span></div>
+    <div class="footer-tagline">Offline Policy Audit, Purpose-Built for FortiGate Firewalls.</div>
+    <div class="footer-copyright">© {{ current_year }} Choice Guide Lab. All rights reserved.</div>
+    <div class="footer-legal" data-i18n>This software is proprietary and licensed for use by authorized users only. Unauthorized reproduction, redistribution, or reverse engineering is strictly prohibited. All configuration data is processed locally on your device and is never transmitted to external servers. Analysis results are provided for operational reference only — all policy decisions and resulting network changes are the sole responsibility of the user.</div>
+  </footer>
   </main>
   </div>
 
-  <footer class="footer-signature">
-    <div class="footer-product">AI-Policy Optimizer <span class="apo-mark-dark">(APO)</span></div>
-    <div class="footer-tagline">AI-Powered Automation, Purpose-Built for FortiGate Firewalls.</div>
-    <div class="footer-copyright">© {{ current_year }} Choice Guide Lab. All rights reserved.</div>
-    <div class="footer-legal">This software is proprietary and licensed for use by authorized users only. Unauthorized reproduction, redistribution, or reverse engineering is strictly prohibited. All configuration data is processed locally on your device and is never transmitted to external servers. Analysis results are provided for operational reference only — all policy decisions and resulting network changes are the sole responsibility of the user.</div>
-  </footer>
+  <!-- ══ 장비 등록 마법사 ═══════════════════════════════════════════
+       파일을 어느 순서로 넣어야 하는지가 이 제품의 첫 관문이다. 각 단계는
+       **기존 입력을 그대로 조작한다** — 마법사가 업로드를 따로 구현하면 같은
+       입력이 경로마다 다르게 처리되고, 그건 이 제품에서 반복해서 사고를 낸
+       유형이다. 여기서는 안내와 순서만 담당한다. -->
+  <div id="setupWizard" class="wiz-overlay hidden">
+    <div class="wiz-modal" role="dialog" aria-modal="true" aria-labelledby="wizTitle">
+      <div class="wiz-head">
+        <div>
+          <div class="wiz-step-label" id="wizStepLabel">Step 1 of 5</div>
+          <!-- 제목은 자바스크립트가 상황에 맞게 쓴다(등록 vs 이어서 손보기).
+               data-i18n을 달아 두면 언어를 바꿀 때 i18n이 원문으로 되돌려
+               그 구분이 사라진다. 번역은 t()가 맡는다. -->
+          <h2 id="wizTitle">Register a device</h2>
+        </div>
+        <button type="button" id="wizCloseBtn" class="mini-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="wiz-progress" id="wizProgress"></div>
+
+      <div class="wiz-body">
+        <div id="wizDraftBar" class="wiz-draft hidden">
+          <span id="wizDraftText"></span>
+          <button type="button" id="wizDraftResume" class="mini-btn" data-i18n>Resume</button>
+          <button type="button" id="wizDraftDiscard" class="mini-btn" data-i18n>Start over</button>
+        </div>
+
+        <div class="wiz-step" data-step="1">
+          <h3 data-i18n>Configuration file</h3>
+          <!-- 이 문단들은 data-i18n을 잎 요소에만 단다 — textContent를 통째로
+               바꾸므로 <code>·<strong> 자식이 있는 요소에 달면 태그가 벗겨진다. -->
+          <p data-i18n-rich>Upload the device's full configuration (<code>.conf</code> / <code>.txt</code>).
+             This registers the device — everything you add after this is attached to it.</p>
+          <div class="wiz-actions">
+            <button type="button" id="wizPickConfig" class="primary-btn" data-i18n>Choose config file</button>
+            <span class="wiz-state" id="wizConfigState" data-i18n>Not registered yet</span>
+          </div>
+        </div>
+
+        <div class="wiz-step hidden" data-step="2">
+          <h3 data-i18n>Firewall Policy CSV</h3>
+          <p data-i18n-rich>Adds <strong>hit count / last used</strong> per firewall policy. Without it no policy
+             can be called unused — severity 1/2/7 still work, the disuse axis does not.</p>
+          <!-- **6.2.3 에서 이 안내만 보고 막힌 사례가 있다**(2026-09-14 Jayden
+               실사용). GUI 의 정책 목록 CSV 내보내기는 **FortiOS 7.0.2 에서
+               추가된 기능**이라 그 이전 펌웨어에는 버튼 자체가 없다. 그런데
+               이 문구는 버전을 말하지 않아, 사용자는 "APO 를 쓸 수 없다" 로
+               결론짓는다 — 실제로는 아래 두 길이 있고 둘 다 구버전에서 된다.
+               (출처: Fortinet 문서 "Export firewall policy list to CSV and
+               JSON formats 7.0.2") -->
+          <p class="wiz-how" data-i18n-rich>FortiGate GUI → Policy &amp; Objects → Firewall Policy →
+             toolbar <em>Export</em> → CSV. The export contains the columns you are
+             <strong>currently showing</strong>, so add <strong>Hit Count</strong> and
+             <strong>Last Used</strong> to the view first.</p>
+          <p class="wiz-how" data-i18n-rich><strong>No Export button?</strong> That button arrived in
+             <strong>FortiOS 7.0.2</strong>. On older firmware you do not need this CSV —
+             use <strong>Collect from device</strong> (reads the same numbers over the REST API),
+             or paste CLI output on the Sources screen
+             (<code>diagnose firewall iprope show 100004 &lt;policy id&gt;</code>).</p>
+          <div class="wiz-actions">
+            <button type="button" id="wizPickFw" class="primary-btn" data-i18n>Choose FW Policy CSV</button>
+            <span class="wiz-state" id="wizFwState" data-i18n>Not added</span>
+          </div>
+        </div>
+
+        <div class="wiz-step hidden" data-step="3">
+          <h3><span data-i18n>Proxy Policy CSV</span> <span class="wiz-optional" data-i18n>optional</span></h3>
+          <p data-i18n-rich>Only for devices that use proxy policies. <strong>If this device has none, just click
+             Next</strong> — nothing is lost.</p>
+          <div class="wiz-actions">
+            <button type="button" id="wizPickProxy" class="primary-btn" data-i18n>Choose Proxy Policy CSV</button>
+            <span class="wiz-state" id="wizProxyState" data-i18n>Not added</span>
+          </div>
+        </div>
+
+        <div class="wiz-step hidden" data-step="4">
+          <h3 data-i18n>Your user IP ranges</h3>
+          <p data-i18n>The line between user traffic and server traffic. Without it, policies that need that
+             distinction come back as Cannot assess.</p>
+          <p class="wiz-how" data-i18n-rich>One per line. CIDR (<code>10.10.0.0/16</code>), device notation
+             (<code>10.10.0.0 255.255.0.0</code>), a range (<code>10.0.0.1-10.0.0.100</code>) or a
+             single IP all work. A trailing label and <code>#</code> comments are fine.</p>
+          <textarea id="wizRanges" class="wiz-textarea" rows="6"
+                    placeholder="10.10.0.0/16 HQ users&#10;192.168.20.0/24 Branch"></textarea>
+          <div class="wiz-note" id="wizRangesNote" data-i18n>These ranges are saved with this device. Another
+            device you register keeps its own — a head office and a branch rarely share the same
+            user segments.</div>
+        </div>
+
+        <div class="wiz-step hidden" data-step="5">
+          <h3><span data-i18n>FQDN resolutions</span> <span class="wiz-optional" data-i18n>optional</span></h3>
+          <p data-i18n-rich>Lets policies that use FQDN address objects be judged. Findings from this are marked
+             <em>DNS capture</em> — provable as of capture time, not indefinitely.</p>
+          <p class="wiz-how" data-i18n>On the device run:</p>
+          <pre class="wiz-cmd" id="wizFqdnCmd">diagnose test application dnsproxy 6</pre>
+          <div class="wiz-actions">
+            <button type="button" id="wizCopyCmd" class="mini-btn" data-i18n>Copy command</button>
+            <button type="button" id="wizPickFqdn" class="primary-btn" data-i18n>Upload the output</button>
+            <span class="wiz-state" id="wizFqdnState" data-i18n>Not added</span>
+          </div>
+          <div class="wiz-note" data-i18n-rich>Don't have it yet? <strong>Save &amp; close</strong> keeps what you
+            entered so you can come back after collecting it.</div>
+        </div>
+      </div>
+
+      <div class="wiz-foot">
+        <button type="button" id="wizSaveClose" class="secondary-btn" data-i18n>Save &amp; close</button>
+        <div class="wiz-foot-right">
+          <button type="button" id="wizBack" class="secondary-btn" data-i18n>Back</button>
+          <button type="button" id="wizNext" class="primary-btn" data-i18n>Next</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="licenseModal" class="lic-overlay hidden">
     <div class="lic-modal">
       <div class="lic-header">
         <span class="section-index" data-i18n>Export</span>
-        <h2 style="margin:6px 0 0;font-size:20px;color:var(--text-strong)">Export License Required</h2>
+        <h2 style="margin:6px 0 0;font-size:20px;color:var(--text-strong)" data-i18n>Export License Required</h2>
       </div>
 
       <div class="lic-section">
         <div class="lic-label" data-i18n>Have a license key?</div>
         <div class="lic-row">
-          <input type="text" id="licKeyInput" class="lic-input" placeholder="APO-eyJ..." autocomplete="off" />
+          <input type="text" id="licKeyInput" class="lic-input" placeholder="APO2-..." autocomplete="off" />
+          <p class="inline-status" style="margin-top:6px;text-align:left"><span data-i18n>Support</span> · choiceguidelab@gmail.com</p>
           <button type="button" id="licActivateBtn" class="primary-btn" data-i18n>Activate</button>
         </div>
         <div id="licActivateMsg" class="lic-msg"></div>
       </div>
 
-      <div class="lic-divider">or</div>
+      <div class="lic-divider" data-i18n>or</div>
 
       <div class="lic-section">
         <div class="lic-label" data-i18n>Don't have a license yet?</div>
@@ -813,29 +1533,30 @@
         <div class="tier-grid">
           <label class="tier-card" for="tierSingle">
             <input type="radio" name="apoTier" id="tierSingle" value="single" checked />
-            <div class="tier-head"><span class="tier-name">Single organisation</span><span class="tier-price">$199</span></div>
+            <div class="tier-head"><span class="tier-name" data-i18n>Single organisation</span><span class="tier-price">$199</span></div>
             <ul class="tier-feat">
-              <li>Audit the firewalls of one organisation</li>
-              <li>All exports: Excel audit workbook, action plan, evidence</li>
-              <li>1 year of updates, then keep using the version you bought</li>
+              <li data-i18n>Audit the firewalls of one organisation</li>
+              <li data-i18n>All exports: Excel audit workbook, action plan, evidence</li>
+              <li data-i18n>1 year of updates, then keep using the version you bought</li>
             </ul>
           </label>
           <label class="tier-card" for="tierMsp">
             <input type="radio" name="apoTier" id="tierMsp" value="msp" />
-            <div class="tier-head"><span class="tier-name">MSP / Consultant</span><span class="tier-price">$699</span></div>
+            <div class="tier-head"><span class="tier-name" data-i18n>MSP / Consultant</span><span class="tier-price">$699</span></div>
             <ul class="tier-feat">
-              <li>Everything in Single organisation</li>
-              <li><strong>Use across all your client organisations</strong></li>
-              <li><strong>White-label reports</strong> — your company name on the workbook</li>
+              <li data-i18n>Everything in Single organisation</li>
+              <li data-i18n-rich><strong>Use across all your client organisations</strong></li>
+              <li data-i18n-rich><strong>Batch report</strong> — analyse many devices in one run, one workbook each</li>
+              <li data-i18n-rich><strong>White-label reports</strong> — your company name on the workbook</li>
             </ul>
           </label>
         </div>
 
         <div class="lic-row">
-          <input type="email" id="licEmailInput" class="lic-input" placeholder="Enter your email" />
+          <input type="email" id="licEmailInput" class="lic-input" data-i18n-ph placeholder="Enter your email" />
           <button type="button" id="licBuyBtn" class="secondary-btn" data-i18n>Buy Now →</button>
         </div>
-        <div class="lic-note" data-i18n>Checkout opens in a new tab; your licence key is emailed after purchase.<br>One-time purchase · Air-gapped network support · Everything except exporting is free forever.</div>
+        <div class="lic-note" data-i18n-rich>Checkout opens in a new tab; your licence key is emailed after purchase.<br>One-time purchase · Air-gapped network support · Everything except exporting is free forever.</div>
 
         <!-- 사기 전에 산출물을 볼 방법이 없던 것이 두 번째 문제였다. -->
         <div class="lic-row" style="margin-top:12px">
@@ -848,8 +1569,13 @@
     </div>
   </div>
 
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
-  <script src="{{ url_for('static', filename='shell.js') }}"></script>
-  <script src="{{ url_for('static', filename='i18n.js') }}"></script>
+  <!-- **사전이 먼저 실려야 한다.** i18n.js 가 마지막이면, 그 전에 그린 문장은
+       폴백(원문 그대로, 자리표시자 치환도 안 됨)으로 나가고 `data-i18n-key`
+       도 안 남아 **언어 전환으로도 복구되지 않는다** — 실측: i18n.js 를
+       400ms 늦추자 "{d} device(s) registered" 가 자리표시자째 화면에 남았다
+       (라운드 45). 106 KB 라 실제 로드 지연도 무시할 수준이 아니다. -->
+  <script src="{{ url_for('static', filename='i18n.js') }}?v={{ apo_version }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ apo_version }}"></script>
+  <script src="{{ url_for('static', filename='shell.js') }}?v={{ apo_version }}"></script>
 </body>
 </html>

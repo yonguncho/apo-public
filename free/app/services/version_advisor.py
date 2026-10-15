@@ -184,7 +184,118 @@ def _load_db() -> dict:
     if not db_path.exists():
         return {"bugs": {}, "cves": []}
     with open(db_path, encoding="utf-8") as f:
-        return json.load(f)
+        db = json.load(f)
+    return _repair_db(db)
+
+
+def _dedupe_bugs(bugs: dict) -> dict:
+    """같은 항목이 두 번 실려 개수가 부풀던 것을 없앤다.
+
+    데이터가 **컴포넌트 그룹 단위로 정확히 2배** 중복돼 있었다(전 버전 23,624행
+    / 고유 11,808 — 배수 2.00). 그래서 화면이 "Known Issues 12" 라 말하고 표
+    첫 두 행이 같은 버그였다(라운드 46 실측). 생성기를 고치면 여기는 무해한
+    통과가 된다 — 데이터가 어떻게 오든 화면이 거짓 개수를 말하지 않게 한다.
+    """
+    out = {}
+    for ver, rows in (bugs or {}).items():
+        seen, uniq = set(), []
+        for r in rows or []:
+            key = json.dumps(r, sort_keys=True, ensure_ascii=False)
+            if key in seen:
+                continue
+            seen.add(key)
+            uniq.append(r)
+        out[ver] = uniq
+    return out
+
+
+_RESOLVED_CVE_RE = re.compile(
+    r"FortiOS\s+(\d+\.\d+\.\d+)\s+is no longer vulnerable", re.IGNORECASE)
+
+
+def _derive_missing_branches(db: dict) -> list:
+    """**APO 가 이미 쥐고 있는 근거를 판정에 쓴다.**
+
+    `bugs` 에는 "FortiOS 7.2.7 is no longer vulnerable to … CVE-2024-21762" 라는
+    기록이 있는데, `cves` 의 그 CVE 에는 **7.4 브랜치만** 등록돼 있었다. 그래서
+    7.2.5 장비 화면이 위에서는 "활성 CVE 2건(Low 둘)", 아래 'Fixes in 7.2.7'
+    에서는 같은 CVE 를 고쳤다고 말했다 — 같은 화면이 정반대로 말한 것이다.
+    실제로는 **pre-auth RCE(CVSS 9.8)가 미패치**였다(라운드 46 실측).
+
+    같은 형태의 누락이 **100건**이었다. "X.Y.Z 에서 고쳤다"는 곧 "X.Y.0 ~
+    X.Y.(Z-1) 이 영향받는다"이므로, 그 항목을 만들어 채운다.
+    """
+    have = {}
+    for c in db.get("cves") or []:
+        have.setdefault(c.get("cve_id"), set()).update(
+            a.get("branch") for a in c.get("affected_versions") or [])
+
+    # CVE -> 그 CVE 를 고쳤다고 기록된 (브랜치, 최초 수정판)
+    fixed_in = {}
+    for ver, rows in (db.get("bugs") or {}).items():
+        parts = str(ver).split(".")
+        if len(parts) < 3:
+            continue
+        branch = f"{parts[0]}.{parts[1]}"
+        for r in rows or []:
+            desc = r.get("description") or ""
+            if not _RESOLVED_CVE_RE.search(desc):
+                continue
+            for cve in re.findall(r"CVE-\d{4}-\d+", desc):
+                cur = fixed_in.get((cve, branch))
+                if cur is None or _ver_tuple(ver) < _ver_tuple(cur):
+                    fixed_in[(cve, branch)] = ver
+
+    # **`cves` 목록에 아예 없는 CVE 는 유도가 안 걸렸다.** 브랜치 구멍은
+    # 메우면서 CVE 구멍은 못 메워, `bugs` 가 "고쳤다"고 기록한 121건 중 29건이
+    # 여전히 목록에 없었다(CVE-2023-48795 Terrapin, CVE-2023-38545 curl 등).
+    # 7.2.5 화면이 "Fixes in …" 에서는 언급하고 CVE 목록에서는 침묵하는
+    # 상태가 그대로 남아 있었다(라운드 47 실측). 없는 것은 만들어 넣는다.
+    known_ids = {c.get("cve_id") for c in db.get("cves") or []}
+    for (cid, branch), fix in sorted(fixed_in.items()):
+        if cid in known_ids:
+            continue
+        db.setdefault("cves", []).append({
+            "advisory_id": "", "cve_id": cid,
+            "title": f"{cid} (from resolved-bug record)",
+            "severity": "Unknown", "workaround": None,
+            "affected_versions": [],
+            "derived_from": "resolved-bug record",
+        })
+        known_ids.add(cid)
+
+    added = 0
+    for c in db.get("cves") or []:
+        cve_id = c.get("cve_id")
+        for (cid, branch), fix in fixed_in.items():
+            if cid != cve_id or branch in (have.get(cve_id) or set()):
+                continue
+            fix_t = _ver_tuple(fix)
+            # **`.0` 에서 고쳤다면 그 브랜치는 영향받은 적이 없다.**
+            # `max(0, z-1)` 로 두었더니 "7.4.0 through 7.4.0 / fix 7.4.0" 이라는
+            # 자기모순 행이 18건 생겼다 — 7.6.0 고객 보고서의 '안심 목록' 13건이
+            # 전부 그 행이었다(라운드 47 실측).
+            if fix_t[2] <= 0:
+                continue
+            prev = f"{branch}.{fix_t[2] - 1}"
+            c.setdefault("affected_versions", []).append({
+                "branch": branch,
+                "affected_range": f"{branch}.0 through {prev}",
+                "fix_version": fix,
+                # 이 항목은 원본에 없고 bugs 기록에서 **유도**한 것이다.
+                # 산출물이 근거의 출처를 말할 수 있어야 한다.
+                "derived_from": "resolved-bug record",
+            })
+            have.setdefault(cve_id, set()).add(branch)
+            added += 1
+    return added
+
+
+def _repair_db(db: dict) -> dict:
+    """데이터가 어떻게 오든 화면이 거짓을 말하지 않게 손본다."""
+    db["bugs"] = _dedupe_bugs(db.get("bugs"))
+    _derive_missing_branches(db)
+    return db
 
 
 def _block_has_edit_entries(text_lower: str, block_pattern: str) -> bool:
@@ -378,7 +489,14 @@ def parse_fortios_version(meta: dict) -> dict:
             branch = f"{parts[0]}.{parts[1]}"
             model_code = model_code or "FortiGate"
 
+    # **패치 레벨을 모르면 모른다고 해야 한다.** 예전에는 빌드 표에 없는
+    # 빌드를 만나면 `exact_version = branch` 로 두었는데, 그러면 "7.2" 가
+    # `_ver_tuple` 에서 (7,2,0) 이 되어 **그 브랜치의 최초 릴리스**로 판정됐다.
+    # 실측: 7.2.14(build 1899, 표에 없음) 장비가 활성 CVE 21건 + "7.2.1 로
+    # 업그레이드하라"는 다운그레이드 권고를 받았다. 한 패치 더 최신인 장비가
+    # 더 취약하다고 나온 셈이다(라운드 45).
     exact_version = BUILD_TO_VERSION.get(build, "")
+    patch_known = bool(exact_version)
     if not exact_version and branch:
         exact_version = branch
 
@@ -395,10 +513,37 @@ def parse_fortios_version(meta: dict) -> dict:
         "model_code": model_code,
         "branch": branch,
         "version": exact_version,
+        # 화면·보고서가 '이건 확인된 패치 레벨인가'를 알아야 한다.
+        "patch_known": patch_known,
         "build": build,
         "raw": config_version,
         "meta_keys": list(meta.keys()),
     }
+
+
+def db_covers_branch(branch: str) -> bool:
+    """이 브랜치가 취약점 DB 에 **들어 있기는 한가.**
+
+    DB 는 7.2/7.4/7.6 만 담고 있는데(`coverage: FortiOS 7.2+`), 7.0·6.4 장비를
+    올리면 조회 결과가 비어 "활성 CVE 0건"으로 나왔다 — **조사하지 않은 것을
+    무결점으로 인쇄**한 것이다. 현장에 7.0/6.4 는 아직 많다(라운드 45).
+    목록을 코드에 박지 않고 DB 에서 읽는다 — DB 가 늘면 자동으로 따라온다.
+    """
+    if not branch:
+        return False
+    db = _load_db()
+    covered = set()
+    # cves: 리스트 — 항목마다 affected_versions[].branch
+    for item in db.get("cves") or []:
+        for av in item.get("affected_versions") or []:
+            if av.get("branch"):
+                covered.add(str(av["branch"]))
+    # bugs: 버전 문자열을 키로 하는 dict("7.2.13" 등) — 앞 두 자리가 브랜치
+    for ver in db.get("bugs") or {}:
+        parts = str(ver).split(".")
+        if len(parts) >= 2:
+            covered.add(f"{parts[0]}.{parts[1]}")
+    return branch in covered
 
 
 def _version_is_affected(user_ver: str, affected_range: str, branch: str) -> bool:
@@ -445,9 +590,35 @@ def query_cves(ver_info: dict, active_features: set[str] | None = None) -> list[
                 if feature and feature not in active_features:
                     break
 
+            # **영향 범위를 읽어서 싣기만 하고 판정에 쓰지 않았다.**
+            # `_version_is_affected` 는 정의만 되고 **한 번도 호출되지 않았다** —
+            # 그래서 7.4.0 장비가 "7.4.1 만 영향" CVE 를 활성 취약점으로
+            # 통보받았다(실측: 7.2.4·7.4.0·7.6.2 에서 각 1건씩 오탐).
+            # 패치 레벨이 확정된 장비라 "추정입니다" 완화 문구도 안 붙는다.
+            # 함수가 존재한다는 것 자체가 이 검사를 의도했다는 증거다.
+            # **영향 범위를 읽어서 싣기만 하고 판정에 쓰지 않았다.**
+            # `_version_is_affected` 는 정의만 되고 **한 번도 호출되지 않았다** —
+            # 그래서 7.4.0 장비가 "7.4.1 만 영향" CVE 를 활성 취약점으로
+            # 통보받았다(실측: 7.2.4·7.4.0·7.6.2 에서 각 1건씩 오탐).
+            # 패치 레벨이 확정된 장비라 완화 문구도 안 붙는다.
             fix_ver = av.get("fix_version", "")
             fix_t = _ver_tuple(fix_ver) if fix_ver else (0, 0, 0)
-            is_patched = bool(user_t and fix_t and user_t >= fix_t)
+            in_range = _version_is_affected(exact, av.get("affected_range", ""),
+                                            branch)
+            # `_ver_tuple` 는 실패 시 `(0,0,0)` 을 내는데 그건 **truthy** 다.
+            # 그래서 `fix_version` 이 비었거나 파싱 불가면 무조건 '패치됨'이
+            # 됐다 — Critical 이 무해로 넘어간다(라운드 47 지적).
+            already_fixed = bool(user_t and fix_t and any(fix_t)
+                                 and user_t >= fix_t)
+
+            # 범위 밖이라도 **위로 벗어난 것**(이미 지나온 버전)은 '패치됨'으로
+            # 남긴다 — "이 CVE 는 당신 브랜치에 있었고 당신은 안전하다"는
+            # 안심 정보다. **아래로 벗어난 것**(아직 영향받지 않는 버전)만
+            # 버린다. 둘을 뭉뚱그려 버리면 안심 목록이 통째로 사라진다.
+            if not in_range and not already_fixed:
+                continue
+
+            is_patched = already_fixed or not in_range
 
             results.append({
                 "advisory_id": cve.get("advisory_id"),
@@ -458,6 +629,10 @@ def query_cves(ver_info: dict, active_features: set[str] | None = None) -> list[
                 "affected_range": av.get("affected_range"),
                 "fix_version": fix_ver,
                 "is_patched": is_patched,
+                # 원본 DB 에 없고 bugs 기록에서 **유도**한 항목이면 그 사실을
+                # 산출물이 말할 수 있어야 한다 — 근거의 출처가 다르다.
+                **({"derived_from": av["derived_from"]}
+                   if av.get("derived_from") else {}),
             })
             break
 
@@ -610,6 +785,23 @@ def run_advisor(meta: dict, raw_config: str = "") -> dict:
         active_features = detect_active_features(raw_config)
         policy_applied = detect_policy_applied_features(raw_config)
 
+    # **DB 가 이 브랜치를 안 담고 있으면 조회하지 않는다.** 빈 결과를 '0건'으로
+    # 인쇄하면 조사하지 않은 것이 무결점이 된다(라운드 45 실측: 7.0 장비에
+    # "0 active CVE(s), 0 known issue(s)").
+    covered = db_covers_branch(ver_info.get("branch", ""))
+    if not covered:
+        db = _load_db()
+        return {
+            "ver_info": ver_info,
+            "not_covered": True,
+            "coverage": db.get("coverage") or "",
+            "error_key": "vuln_db_branch_not_covered",
+            "summary": {"unpatched_cves": None, "patched_cves": None,
+                        "known_issues": None, "upgrade_fix_versions": None},
+            "unpatched_cves": [], "patched_cves": [],
+            "known_issues": [], "upgrade_fixes": [],
+        }
+
     cves = query_cves(ver_info, active_features)
     known_issues = query_known_issues(ver_info, active_features)
     upgrade_fixes = query_upgrade_fixes(ver_info, active_features, policy_applied)
@@ -619,6 +811,9 @@ def run_advisor(meta: dict, raw_config: str = "") -> dict:
 
     return {
         "ver_info": ver_info,
+        # 패치 레벨이 미상이면 이 목록은 **그 브랜치 최초 릴리스 기준**이다.
+        # 화면이 그 사실을 말해야 사용자가 과대 판정을 알아본다.
+        "patch_level_assumed": not ver_info.get("patch_known", False),
         "active_features": sorted(active_features) if active_features is not None else None,
         "policy_applied_features": sorted(policy_applied) if policy_applied is not None else None,
         "summary": {

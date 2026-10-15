@@ -10,6 +10,9 @@ from typing import Any
 # 아주 긴 주소/서비스 목록을 한 셀에 넣는 경우가 있어 상한을 넉넉히 올린다.
 # sys.maxsize를 그대로 쓰면 방어가 사라지므로 유한한 값으로 둔다.
 _CSV_FIELD_LIMIT = 8 * 1024 * 1024
+
+# 정책 번호로 인정하는 표기: '5', '05', '5.0', '5.000'. ASCII 숫자만 본다.
+_DECIMAL_ID = re.compile(r"^([0-9]+)(?:\.0*)?$")
 try:
     if csv.field_size_limit() < _CSV_FIELD_LIMIT:
         csv.field_size_limit(_CSV_FIELD_LIMIT)
@@ -86,17 +89,39 @@ class PolicyStatsCsvParser:
                     break
         return header_map
 
+    @staticmethod
+    def _canonical_id(raw: str) -> str:
+        """숫자로 읽히는 정책 번호를 한 가지 표기로 모은다.
+
+        같은 장비의 CSV인데도 앞자리 0('01')이나 엑셀·pandas가 붙인 소수점
+        ('1.0') 때문에 config의 정책 1번과 매칭되지 않아, 사용량이 조용히
+        버려지고 미사용 판정으로 이어졌다. 숫자가 아닌 ID는 손대지 않는다.
+        """
+        text = raw.strip()
+        if not text:
+            return text
+        # float()로 판단하면 '1e3'·'1_0'·전각/아랍숫자·NBSP까지 흡수해 서로
+        # 다른 두 ID가 한 키로 합쳐지고 나중 행이 앞 행을 조용히 덮는다.
+        # 받아들일 표기를 명시한다: 10진 정수, 그리고 소수부가 0뿐인 것.
+        m = _DECIMAL_ID.match(text)
+        if not m:
+            return text
+        return str(int(m.group(1)))
+
     def _extract_policy_id(self, row: dict[str, Any], header_map: dict[str, str]) -> str | None:
         header = header_map.get("policy_id")
         if header and row.get(header) not in (None, ""):
-            return str(row[header]).strip()
+            return self._canonical_id(str(row[header]))
 
         name_header = header_map.get("name")
         if name_header:
             name_value = str(row.get(name_header, "")).strip()
             match = re.search(r"\((\d+)\)\s*$", name_value)
             if match:
-                return match.group(1)
+                # 형제 분기도 **같은 정규화**를 지나야 한다. 여기만 빠져 있어,
+                # 이름에서 뽑은 '05'가 config의 5번과 매칭되지 않고 그 정책의
+                # 사용량이 조용히 버려졌다(판정 사유가 '사용량 없음'으로 바뀜).
+                return self._canonical_id(match.group(1))
         return None
 
     def _extract_hit_count(self, row: dict[str, Any], header_map: dict[str, str]) -> int | None:

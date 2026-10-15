@@ -67,6 +67,34 @@ def interval_summary(diff: dict) -> dict:
         "added_objects": s.get("added_objects", 0),
         "removed_objects": s.get("removed_objects", 0),
         "other_changes": s.get("other_changes", 0),
+        # **주소객체를 0.0.0.0/0 으로 열어도 증적에 한 글자도 안 남았다.**
+        # `changed_objects` 를 아예 안 담아서, 같은 두 파일에서 설정 비교는
+        # `PARTNER_A 198.51.100.0/24 → 0.0.0.0/0` 을 내는데 정기검토 증적은
+        # 침묵했다(라운드 46 실측).
+        "changed_objects": s.get("changed_objects", 0),
+        # 숫자만 적으면 "3건"이 무엇인지 알 수 없다. 무엇이 바뀌었는지 이름을
+        # 남긴다 — 관리자 계정 추가·VPN 신설이 이름 없이 숫자로만 남았다.
+        # **조용한 잘림은 이 프로젝트가 반복해 지적받은 것이다.** 숫자는 30인데
+        # 목록은 20, added 25개인데 10개만 실려도 표시가 없었다 — 검토자가
+        # 대조하면 조용히 틀린다(라운드 47 실측 4곳).
+        "truncated": {
+            k: v for k, v in {
+                "other_sections": max(0, len(diff.get("other_changes") or []) - 20),
+                "changed_objects": max(0, len(diff.get("changed_objects") or []) - 50),
+                "added_ids": max(0, len(added_ids) - 50),
+                "removed_ids": max(0, len(removed_ids) - 50),
+                "changed_ids": max(0, len(changed_ids) - 50),
+            }.items() if v
+        },
+        "other_sections": [
+            {"section": o.get("section"),
+             "added": (o.get("added") or [])[:10],
+             "removed": (o.get("removed") or [])[:10],
+             "changed": (o.get("changed") or [])[:10]}
+            for o in (diff.get("other_changes") or [])[:20]
+        ],
+        "changed_object_names": [
+            str(o.get("name")) for o in (diff.get("changed_objects") or [])[:50]],
         "added_ids": added_ids[:50],
         "removed_ids": removed_ids[:50],
         "changed_ids": changed_ids[:50],
@@ -102,8 +130,41 @@ def build_evidence_workbook(timeline: dict, report_meta: dict | None = None) -> 
         ("Tool version", rm.get("apo_version", "")),
         ("Device(s)", ", ".join(hosts)),
         ("Snapshots reviewed", str(len(snaps))),
-        ("Review basis", PCI_DSS_CITATION),
     ]
+    # **서로 다른 방화벽의 스냅샷을 한 타임라인에 넣으면 '변경 0건'은 의미가
+    # 없다.** 그런데 파일명은 열린 장비 이름으로 저장되고 헤드라인만 보는
+    # 사람은 '그 장비는 변경 없음'으로 읽는다. 서버는 hostname 을 정확히
+    # 파싱해 두고도 말하지 않았다(라운드 25 실측) — 문서 첫 줄에 적는다.
+    if len(hosts) > 1:
+        kv.append(("⚠ Mixed devices",
+                   "These snapshots come from different firewalls "
+                   f"({', '.join(hosts)}). Differences between them are not "
+                   "changes to one device — do not read this as a change "
+                   "history."))
+    else:
+        # **이름이 하나라고 장비가 하나인 것은 아니다.** 두 고객이 둘 다
+        # 'FGT-HQ' 를 쓰거나 스냅샷에 hostname 줄이 없으면, 이 문서를 '한
+        # 장비의 변경 이력'이라 단정할 근거가 없다. 서명란이 있는 문서이므로
+        # 모르는 것은 모른다고 적는다(라운드 29 지적).
+        # ⚠ 를 붙이지 않는다 — 이건 정상 경로(한 방화벽의 스냅샷들)이기도 하다.
+        # 매번 경고를 달면 '서로 다른 방화벽' 이라는 진짜 경고가 묻힌다.
+        named = sum(1 for s in snaps if s.get("hostname"))
+        if not hosts:
+            _identity = ("No snapshot records a hostname, so APO cannot confirm "
+                         "they come from one firewall.")
+        elif named < len(snaps):
+            # 일부만 이름이 있는데 '전부 같은 이름을 보고했다'고 적으면 없는
+            # 사실이다 — 서명란이 있는 문서다(라운드 30 실측).
+            _identity = (f"Only {named} of {len(snaps)} snapshots record a "
+                         f"hostname ('{hosts[0]}'), so APO cannot confirm they "
+                         "come from one firewall.")
+        else:
+            _identity = (f"All snapshots report the hostname '{hosts[0]}'. A "
+                         "hostname is not unique — two firewalls can carry the "
+                         "same name, so this alone does not prove they are one "
+                         "device.")
+        kv.append(("Device identity", _identity))
+    kv.append(("Review basis", PCI_DSS_CITATION))
     for k, v in kv:
         write_text_cell(ws, r, 1, k).font = Font(bold=True)
         c = write_text_cell(ws, r, 2, v)
@@ -168,9 +229,29 @@ def build_evidence_workbook(timeline: dict, report_meta: dict | None = None) -> 
         ws3.cell(row=r, column=4, value=sm.get("added_policies", 0))
         ws3.cell(row=r, column=5, value=sm.get("removed_policies", 0))
         ws3.cell(row=r, column=6, value=sm.get("changed_policies", 0))
-        write_text_cell(ws3, r, 7,
-                        f"+{sm.get('added_objects', 0)} / -{sm.get('removed_objects', 0)}")
-        ws3.cell(row=r, column=8, value=sm.get("other_changes", 0))
+        # **재정의된 객체를 안 세면 0.0.0.0/0 확대가 증적에서 사라진다.**
+        _chg = sm.get("changed_objects", 0)
+        write_text_cell(
+            ws3, r, 7,
+            f"+{sm.get('added_objects', 0)} / -{sm.get('removed_objects', 0)}"
+            + (f" / ~{_chg}" if _chg else ""))
+        # 숫자만 적으면 "3건"이 무엇인지 알 수 없다 — 이름을 함께 남긴다.
+        _names = []
+        for o in (sm.get("other_sections") or []):
+            for verb, key in (("+", "added"), ("-", "removed"), ("~", "changed")):
+                for n in (o.get(key) or []):
+                    _names.append(f"{o.get('section')}: {verb}{n}")
+        for n in (sm.get("changed_object_names") or []):
+            _names.append(f"object: ~{n}")
+        _shown, _total = _names[:12], len(_names)
+        _tr = sm.get("truncated") or {}
+        write_text_cell(
+            ws3, r, 8,
+            str(sm.get("other_changes", 0))
+            + (" — " + "; ".join(_shown) if _shown else "")
+            + (f" … (+{_total - len(_shown)} more not listed)"
+               if _total > len(_shown) else "")
+            + (f" [list truncated: {_tr}]" if _tr else ""))
         write_text_cell(ws3, r, 9, ", ".join(sm.get("added_ids") or []))
         write_text_cell(ws3, r, 10, ", ".join(sm.get("removed_ids") or []))
         write_text_cell(ws3, r, 11, ", ".join(sm.get("changed_ids") or []))

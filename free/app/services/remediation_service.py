@@ -88,6 +88,43 @@ def _device_conn(device: dict) -> tuple:
     return host, port, token, verify
 
 
+def tls_fingerprint(host: str, port: int, timeout: float = 6.0) -> str:
+    """이 주소가 지금 내미는 인증서의 SHA-256 지문(hex). 못 얻으면 "".
+
+    **왜 검증을 끈 채로도 지문은 봐야 하는가** (B-79).
+    FortiGate 는 대부분 자체 서명 인증서를 쓴다 — 화면의 'Skip SSL Verify'
+    가 사실상 정상 경로다. 그 상태에서 read-only 관리자 Bearer 토큰이
+    검증 없는 채널로 나가므로, 관리망에 자리를 잡은 공격자가 토큰을 그대로
+    가져갈 수 있다. 그렇다고 검증을 강제하면 자체 서명 장비에서 수집·조치가
+    통째로 안 된다.
+
+    그래서 SSH 가 쓰는 길을 쓴다(TOFU): **처음 본 지문을 이 장비의 것으로
+    고정하고, 다음부터 달라지면 막는다.** 첫 연결의 MITM 은 못 잡지만,
+    그 뒤의 인증서 교체는 전부 잡힌다 — 지금은 아무것도 못 잡는다.
+    시리얼 pin(remediation_serial)과 같은 모양이라 화면 동선도 같다.
+
+    검증을 켠 장비에는 쓰지 않는다 — 거기서는 CA 가 이미 답을 준다.
+    """
+    import ssl
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    # **여기서는 일부러 검증하지 않는다.** 목적이 '누구인지 판정'이 아니라
+    # '무엇을 내밀었는지 기록'이다 — 자체 서명이라 검증하면 아무것도 못 본다.
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as tls:
+                der = tls.getpeercert(binary_form=True)
+        if not der:
+            return ""
+        import hashlib
+        return hashlib.sha256(der).hexdigest()
+    except Exception:
+        # 연결 실패는 여기서 판정하지 않는다 — 본 요청이 같은 이유로 실패하며
+        # 사용자에게 훨씬 정확한 사유를 준다. 지문만 '모름'으로 돌려준다.
+        return ""
+
+
 def get_candidates(parsed: dict, severity_results: dict) -> dict:
     """
     비활성화 후보 목록을 두 카테고리로 반환한다.
@@ -114,6 +151,13 @@ def get_candidates(parsed: dict, severity_results: dict) -> dict:
                 "policy_id": pid,
                 "name":      name,
                 "type":      ptype,
+                # **VDOM 은 정책 번호의 일부다.** 워크북 각주는 "다중 VDOM 에서는
+                # 정책의 VDOM 을 먼저 지정하라"고 하면서 **어느 VDOM 인지는
+                # 어디에도 안 적었다** — 조치 계획에 1번이 두 줄 나오는데
+                # root 의 ANY-ANY-PERMIT 인지 dmz 의 운영 정책인지 알 수 없다
+                # (라운드 47 실측). API 쓰기는 막혀 있고 수동 적용에 쓰는 문서가
+                # 바로 이것이다.
+                "vdom":      p.get("vdom") or "",
                 "srcaddr":   _fmt_list(p.get("srcaddr_display") or p.get("srcaddr")),
                 "dstaddr":   _fmt_list(p.get("dstaddr_display") or p.get("dstaddr")),
                 "service":   _fmt_list(p.get("service_display") or p.get("service")),
@@ -174,18 +218,91 @@ def test_connection(device: dict) -> dict:
     src_note  = f" | Your IP → FortiGate: {source_ip}" if source_ip and source_ip != "127.0.0.1" else ""
 
     url = f"https://{ip}:{port}/api/v2/monitor/system/status"
+
+    def _ask(params=None):
+        return requests.get(url, headers={"Authorization": f"Bearer {token}"},
+                            verify=verify, timeout=6, params=params)
+
+    def _serial_of(payload, res):
+        # **시리얼은 results 안이 아니라 응답 봉투 최상위에 실리는 게
+        # FortiOS 표준이다.** results 만 보던 동안 vdom 모드 장비(OA 실장비
+        # 2026-08-23)에서 "시리얼을 알려주지 않는다"로 떨어져, 조치 적용의
+        # 신원 고정(pin)이 시작조차 못 했다. 두 자리 모두 본다.
+        s = res.get("serial") or res.get("Serial") or ""
+        if not s and isinstance(payload, dict):
+            s = payload.get("serial") or ""
+        return str(s).strip()
+
     try:
-        r = requests.get(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            verify=verify,
-            timeout=6,
-        )
+        r = _ask()
         if r.status_code == 200:
-            res = r.json().get("results", {})
+            payload = r.json()
+            res = payload.get("results", {})
+            if not isinstance(res, dict):
+                res = {}
             hostname = res.get("hostname") or res.get("Hostname") or "FortiGate"
-            version  = res.get("version")  or res.get("Version")  or ""
-            return {"ok": True,  "message": f"Connected — {hostname} ({version}){src_note}", "source_ip": source_ip}
+            version  = (res.get("version") or res.get("Version")
+                        or payload.get("version") or "")
+            # hostname 을 **값으로도** 돌려준다. 서버가 '지금 열어 둔 설정의
+            # 장비'와 대조해야 하는데, 문장에만 섞어 두면 다시 정규식으로 뜯어야
+            # 하고, 이 제품에서 그렇게 하다 깨진 자리가 이미 있다.
+            # **시리얼도 값으로 돌려준다.** hostname 은 두 고객이 같은 이름을
+            # 쓰는 일이 오히려 정상이라(FGT-HQ, fw01) 신원 증명이 못 된다.
+            # 시리얼은 장비마다 고유하므로, 서버가 이 장비의 신원으로 고정해
+            # 두고 다음 연결부터 대조한다 — 이름으로는 영영 못 하던 일이다.
+            serial = _serial_of(payload, res)
+            # **"장비가 시리얼을 안 준다"와 "이번에 못 읽었다"는 다른 사실이다.**
+            # 둘 다 serial="" 로 뭉개면, 신원 대화상자가 "지금도 다음에도 없다"
+            # 고 단정한다 — 재시도가 순간 장애로 실패한 것뿐이었다면 거짓이고,
+            # 사용자는 매번 수동 확인을 영구 부담으로 받아들인다(R75-1).
+            #   answered = 장비가 실제로 답했고 그 답에 시리얼이 없다
+            #   failed   = 조회가 끝나지 못했다 → 시리얼 유무는 미상
+            serial_probe = "answered"
+            if not serial:
+                # vdom 모드 장비는 무스코프 monitor 가 빈 results 를 줄 수
+                # 있다(OA 실측 — v108 수집 경로와 같은 병리). 등록 VDOM
+                # (없으면 root) 스코프로 한 번 더 물어본다.
+                _vd = str((device or {}).get("vdom") or "").strip() or "root"
+                # 재시도의 순간 장애가 바깥 except 로 빠지면, 첫 요청이 200
+                # 으로 이미 증명한 연결이 "Connection refused" 로 둔갑한다
+                # (라운드 74). 재시도 실패는 재시도 포기일 뿐 — 연결 성공 +
+                # 시리얼 미상(v109 계약)으로 돌아간다.
+                try:
+                    r2 = _ask({"vdom": _vd})
+                except requests.exceptions.RequestException:
+                    r2 = None
+                if r2 is None or r2.status_code != 200:
+                    # 첫 응답(무스코프 200·빈 results)은 vdom 모드에서 부재의
+                    # 증거가 못 된다 — 그래서 이 재시도가 있는 것이다. 재시도가
+                    # 끝나지 못했으면 부재도 확인되지 않은 것이다.
+                    serial_probe = "failed"
+                else:
+                    try:
+                        p2 = r2.json()
+                    except ValueError:
+                        p2 = {}
+                        serial_probe = "failed"
+                    res2 = p2.get("results", {}) if isinstance(p2, dict) else {}
+                    if not isinstance(res2, dict):
+                        res2 = {}
+                    s2 = _serial_of(p2, res2)
+                    if s2:
+                        serial = s2
+                        serial_probe = "answered"
+                        hostname = (res2.get("hostname")
+                                    or res2.get("Hostname") or hostname)
+                        version = (res2.get("version") or res2.get("Version")
+                                   or p2.get("version") or version)
+            return {"ok": True, "hostname": hostname, "fw_version": version,
+                    "serial": serial, "serial_probe": serial_probe,
+                    # 검증을 끈 장비에서만 지문을 본다(B-79). 검증을 켰으면
+                    # CA 가 이미 답을 줬고, 여기서 또 재면 의미 없이 연결이
+                    # 한 번 더 난다.
+                    "tls_fingerprint": ("" if verify
+                                        else tls_fingerprint(ip, port)),
+                    "tls_verified": bool(verify),
+                    "message": f"Connected — {hostname} ({version}){src_note}",
+                    "source_ip": source_ip}
         if r.status_code == 401:
             return {"ok": False, "message": f"Authentication failed — check API token{src_note}", "source_ip": source_ip}
         return {"ok": False, "message": f"HTTP {r.status_code}: {r.text[:100]}{src_note}", "source_ip": source_ip}
@@ -288,7 +405,15 @@ def export_postman(policies: list[dict], device: dict) -> str:
                     "raw": json.dumps({"status": "disable"}, indent=2),
                     "options": {"raw": {"language": "json"}},
                 },
-                "description": f"Reason: {p.get('reason','')} | Src: {p.get('srcintf','')} -> Dst: {p.get('dstintf','')}",
+                # 후보 dict 는 srcintf/dstintf 를 담지 않는다(base 는 srcaddr/
+                # dstaddr/vdom 만 든다). 예전 키를 읽어 설명이 늘 "Src:  -> Dst: "
+                # 로 비어 나갔다 — 운영자가 어떤 정책인지 대조할 단서가 사라졌다.
+                # 주소 스코프로 채우고, 정책의 VDOM 이 있으면 함께 밝힌다
+                # (device 연결 vdom 이 아니라 정책별 vdom — 같은 번호 구별용).
+                "description": (
+                    (f"[VDOM {p.get('vdom')}] " if p.get("vdom") else "")
+                    + f"Reason: {p.get('reason','')} | "
+                    + f"Src: {p.get('srcaddr','')} -> Dst: {p.get('dstaddr','')}"),
             },
             "response": [],
         })
@@ -335,21 +460,32 @@ def export_csv(to_disable: list[dict], already_disabled: list[dict]) -> bytes:
     # FortiGate는 firewall과 proxy 정책에 각각 1번부터 번호를 매긴다. 종류가 없으면
     # proxy 12번 행을 보고 `config firewall policy / edit 12`를 쳐서 **무관한 살아
     # 있는 정책**을 끄게 된다(실 config에서 fw/proxy ID 충돌 44건 관측).
+    # **VDOM 도 정책 번호의 일부다.** 후보 레코드는 이미 `vdom` 을 들고 있고
+    # 워크북은 CLI 앞에 `config vdom / edit <이름>` 을 붙이는데, 이 CSV 에는
+    # 열조차 없었다 — 운영자가 관리 VDOM(기본 root)에 앉은 채
+    # `config firewall policy` → `edit 12` 를 치면 root 의 12번(무관한 살아
+    # 있는 정책)을 끄거나, 없으면 FortiOS 가 12번을 **새로 만들고** 정작
+    # 끄려던 정책은 그대로 남는다. 파일에 VDOM 이 없으니 나중에 복구할 단서도
+    # 없다(라운드 48 실측). 바로 위 주석이 fw/proxy 에 대해 말하는 사고와
+    # 같은 사고다 — 종류만 고치고 VDOM 은 남겨 뒀다.
     writer.writerow([
-        "Category", "Policy Type", "Policy ID", "Policy Name",
+        "Category", "Policy Type", "VDOM", "Policy ID", "Policy Name",
         "Risk Level", "Source IP", "Destination IP",
         "Service", "Schedule", "Reason", "CLI Context",
     ])
 
     def row(category: str, p: dict) -> list:
         ptype = "proxy" if str(p.get("type", "")).strip().lower() == "proxy" else "firewall"
+        vdom = str(p.get("vdom") or "").strip()
         cli_ctx = ("config firewall proxy-policy" if ptype == "proxy"
                    else "config firewall policy")
-        return [category, ptype] + [
+        if vdom:
+            cli_ctx = f"config vdom / edit {vdom} / {cli_ctx}"
+        return [category, ptype, _csv_safe(vdom)] + [
             _csv_safe(p.get(f, ""))
             for f in ("policy_id", "name", "risk_level", "srcaddr",
                       "dstaddr", "service", "schedule", "reason")
-        ] + [cli_ctx]
+        ] + [_csv_safe(cli_ctx)]
 
     for p in to_disable:
         writer.writerow(row("Disable Candidate", p))
@@ -357,4 +493,47 @@ def export_csv(to_disable: list[dict], already_disabled: list[dict]) -> bytes:
     for p in already_disabled:
         writer.writerow(row("Already Disabled", p))
 
+    return ("﻿" + output.getvalue()).encode("utf-8")
+
+
+def export_apply_results(results: list[dict], meta: dict) -> bytes:
+    """적용 결과 CSV. **되돌릴 수 없는 쓰기의 기록이 화면에만 있었다.**
+
+    조치 적용 결과는 DOM 에만 렌더되고 새로고침하면 사라졌다 — 감사에서
+    가장 먼저 요구하는 산출물인데 남기는 방법이 없었다(2026-08-25 Jayden).
+
+    화면 표에 없던 두 가지를 함께 적는다:
+      · 언제 — 파일만 보고는 언제 나간 변경인지 알 수 없다
+      · 어느 장비 — hostname 은 두 고객이 같은 이름을 쓰는 일이 정상이라
+        신원 증명이 못 된다(라운드 29·30). 시리얼이 이 장비의 신원이다.
+    머리말을 주석행(#)으로 얹는다 — Excel 이 열 때 방해가 없고, 표 부분만
+    잘라 쓰는 사람에게도 본문은 그대로 CSV 다.
+    """
+    output = io.StringIO()
+    for label, key in (("Applied at", "applied_at"),
+                       ("Device", "device"),
+                       ("Device serial", "serial"),
+                       ("Device address", "ip")):
+        val = str(meta.get(key) or "").strip()
+        # 시리얼을 못 읽었으면 빈칸이 아니라 그 사실을 적는다 — 빈칸은
+        # "안 적었다"와 "확인 못 했다"를 구별하지 못한다(R75-1 과 같은 규칙).
+        if not val and key == "serial":
+            val = "not reported"
+        if val:
+            output.write(f"# {label}: {_csv_safe(val)}\n")
+
+    writer = csv.writer(output)
+    writer.writerow(["Result", "Policy Type", "VDOM", "Policy ID",
+                     "Policy Name", "Message"])
+    for r in results or []:
+        ptype = ("proxy" if str(r.get("type", "")).strip().lower() == "proxy"
+                 else "firewall")
+        writer.writerow([
+            "OK" if r.get("ok") else "FAILED",
+            ptype,
+            _csv_safe(r.get("vdom", "")),
+            _csv_safe(r.get("policy_id", "")),
+            _csv_safe(r.get("name", "")),
+            _csv_safe(r.get("message", "")),
+        ])
     return ("﻿" + output.getvalue()).encode("utf-8")

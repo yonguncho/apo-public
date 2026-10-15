@@ -135,7 +135,7 @@ paid licence agreement.
 ## Repository layout
 
 ```
-free/      — published source tree of the application (last synced at v95;
+free/      — published source tree of the application (synced at v134;
              the Releases binaries are the current version)
 paid/      — notes only; binaries are distributed via Releases
 preview/   — static HTML previews of the main screens

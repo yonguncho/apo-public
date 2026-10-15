@@ -23,12 +23,21 @@ _LEGACY_KEY_ALIASES = {
     "vdi_objects":  "user_segment_objects",
 }
 
+# mgmt 는 infra 로 합쳐졌다(둘 다 등급 6이라 칸을 나눌 이유가 없었다).
+# **단순 별칭으로 두면 안 된다** — 구형 파일에 mgmt_objects 와 infra_objects
+# 가 둘 다 있으면 나중 것이 앞엣것을 덮어써 한쪽이 통째로 사라진다.
+# 합집합으로 병합한다.
+#
+# 이 모듈은 현재 어디서도 호출되지 않는다(profile_loader 가 그 역할을 한다).
+# 그래도 맞춰 두는 이유는, 이 경로가 되살아났을 때 예외가 조용히 사라지는
+# 것이 곧 판정변화이기 때문이다.
+_LEGACY_MERGE_KEYS = {"mgmt_objects": "infra_objects"}
+
 
 def _default_rules() -> dict:
     return {
         "high_risk_objects": [],      # 항상 Critical(S1)로 분류할 객체
         "user_segment_objects": [],   # 사용자 세그먼트 객체 -> S5
-        "mgmt_objects": [],           # 관리망 객체 -> S6
         "infra_objects": [],          # 인프라 객체 -> S6
         "admin_objects": [],          # 관리자 전용 정책 객체 -> Keep(S7)
         "extra_temp_keywords": [],
@@ -64,10 +73,25 @@ def load_customer_rules(path: str | None = None) -> dict:
             try:
                 with open(p, encoding="utf-8") as f:
                     data = json.load(f)
+                # **병합은 대입이 모두 끝난 뒤에 한다.** 루프 안에서 곧바로
+                # 합치면 키 순서에 의존한다 — {"mgmt_objects":[A],
+                # "infra_objects":[B]} 순서면 뒤의 infra 대입이 방금 합친 A 를
+                # 덮어써 예외가 사라진다(예외 소실 = 등급 상승 = 판정변화).
+                pending: dict[str, list] = {}
                 for k, v in data.items():
                     if k.startswith("_"):
                         continue
+                    target = _LEGACY_MERGE_KEYS.get(k)
+                    if target:
+                        pending.setdefault(target, []).extend(v or [])
+                        continue
                     rules[_LEGACY_KEY_ALIASES.get(k, k)] = v
+                for target, extra in pending.items():
+                    merged = list(rules.get(target) or [])
+                    for item in extra:
+                        if item not in merged:
+                            merged.append(item)
+                    rules[target] = merged
                 return rules
             except Exception:
                 continue

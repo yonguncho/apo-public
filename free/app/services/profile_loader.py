@@ -33,6 +33,10 @@ _LEGACY_KEY_MAP = {
     "high_risk_objects":    ("objects", "high_risk"),
     "vdi_objects":          ("objects", "user_segment"),
     "user_segment_objects": ("objects", "user_segment"),
+    # mgmt 는 infra 로 합쳐졌지만(같은 등급 6) **여기서 같은 자리로 보내지
+    # 않는다.** 구형 파일에 mgmt_objects 와 infra_objects 가 둘 다 있으면
+    # _deep_merge 가 뒤엣것으로 덮어써 한쪽이 통째로 사라진다. 각자
+    # 제자리에 두고, 병합은 to_customer_rules 한 곳에서만 한다.
     "mgmt_objects":         ("objects", "mgmt"),
     "infra_objects":        ("objects", "infra"),
     "admin_objects":        ("objects", "admin"),
@@ -159,13 +163,22 @@ def load_profile(name: str | None = None, search_roots: list[Path] | None = None
     roots = search_roots or _search_roots()
     name = name or os.environ.get("APO_PROFILE") or None
 
+    # **더 구체적인 것이 이긴다 — 루트 순서가 아니라.**
+    # 예전에는 루트를 바깥 고리로 돌아서 `exe/profiles/<customer>.yaml`(고객 납품분)
+    # 다음에 `_MEIPASS/profiles/default.yaml`(번들 기본값)이 병합됐고, 나중
+    # 값이 이기므로 **고객 임계값이 기본값으로 덮였다.** 개발 환경에서는 루트가
+    # 중복 제거돼 드러나지 않고 exe 에서만 나타난다(라운드 39: 절대 히트수
+    # 임계값 off, 등록연도 fallback 소실 — 심각도 판정 자체가 달라진다).
+    #
+    # default.yaml 은 바탕이고 {name}.yaml 은 그 위의 특화다. 그러니 파일을
+    # 바깥 고리로 돌고, 같은 파일끼리는 **가까운 루트가 나중에** 오게 한다
+    # (exe 옆에 둔 것이 번들된 것을 이긴다).
     seen: set[Path] = set()
-    for root in roots:
-        pdir = root / _PROFILE_DIR
-        for fname in ("default.yaml", f"{name}.yaml" if name else None):
-            if not fname:
-                continue
-            path = pdir / fname
+    for fname in ("default.yaml", f"{name}.yaml" if name else None):
+        if not fname:
+            continue
+        for root in reversed(roots):
+            path = root / _PROFILE_DIR / fname
             if path in seen or not path.is_file():
                 continue
             seen.add(path)
@@ -182,7 +195,7 @@ def load_profile(name: str | None = None, search_roots: list[Path] | None = None
             legacy = root / _LEGACY_FILE
             if legacy.is_file():
                 # 구형 설정 파일이 있는 배포는 프로파일 도입 *이전* 동작을
-                # 기대한다(SKBA v62 등 기 납품본). 당시 엔진 내장 기본값이던
+                # 기대한다(v62 등 기 납품본). 당시 엔진 내장 기본값이던
                 # 임계값을 복원하지 않으면, 이 프로파일을 런타임에 연결하는
                 # 순간 중립 기본값이 우선해 기존 고객의 판정 결과가 바뀐다.
                 profile = _deep_merge(profile, _legacy_compat())
@@ -191,6 +204,14 @@ def load_profile(name: str | None = None, search_roots: list[Path] | None = None
                         data = json.load(f)
                     if isinstance(data, dict):
                         profile = _apply_legacy(profile, data)
+                        # **어디서 온 값인지 화면이 말할 수 있어야 한다.**
+                        # 이 병합 뒤에도 프로파일 이름은 여전히 'default' 라,
+                        # 설정 화면이 특정 고객 전용 객체명(관리자·DMZ 그룹명 등)을
+                        # "profile default" 라고 소개했다 — 중립 기본값처럼
+                        # 보인다(라운드 45 지적). 값은 그대로 두고(하위호환이
+                        # 목적이다) **출처를 기록**한다.
+                        profile.setdefault("meta", {})["legacy_file"] = str(
+                            legacy.name)
                 except Exception:
                     pass
                 break
@@ -199,7 +220,7 @@ def load_profile(name: str | None = None, search_roots: list[Path] | None = None
 
 
 def _legacy_compat() -> dict:
-    """프로파일 도입 전(v62~v70) 엔진 내장 기본값. skba.yaml의 임계값과 동일."""
+    """프로파일 도입 전(v62~v70) 엔진 내장 기본값. <customer>.yaml의 임계값과 동일."""
     return {
         "thresholds": {
             "dormancy_days": 365,
@@ -226,7 +247,46 @@ def engine_context(profile: dict) -> dict:
         "thresholds": dict(profile.get("thresholds") or {}),
         "services": dict(profile.get("services") or {}),
         "rules": dict(profile.get("rules") or {}),
+        # 티켓 패턴. 엔진은 있고 없음만 보지만(‘티켓 없음’과 ‘티켓을 안
+        # 읽었음’을 가른다), **패턴 문자열도 함께 넣는다** — 이 값이 바뀌면
+        # 판정이 바뀌므로 판정 근거 지문(_judgement_basis)에 잡혀야 한다.
+        # bool 만 넣으면 RITM→CHG 처럼 값만 바뀐 경우 지문이 그대로다.
+        "ticket_pattern": _ticket_pattern_source(profile),
+        "ticket_pattern_configured": ticket_pattern_configured(profile),
+        # **comment 스캔도 판정 입력이다.** 이걸 끄고 켜면 티켓을 찾느냐가
+        # 갈리고, 그것이 'Valid ITS' 조기종결(Keep)을 좌우한다 — 실측으로
+        # sev7 이 708→745 로 움직였다. 지문에 없으면 토글 후 판정이 갈렸는데
+        # 점검 결과와 조치 계획의 불일치 경고가 침묵한다(정책 498 부류).
+        "scan_comment": _scan_comment_enabled(),
     }
+
+
+def _scan_comment_enabled() -> bool:
+    from .runtime_settings import scan_comment_enabled
+    return scan_comment_enabled()
+
+
+def _ticket_pattern_source(profile: dict) -> str:
+    return _ticket_pattern_state(profile)[0]
+
+
+def _ticket_pattern_state(profile: dict) -> tuple[str, str]:
+    """패턴과 **그 출처**. 출처를 버리면 산출물이 사실을 못 말한다.
+
+    옛 버전에서 저장한 정규식이 무시된 경우와 "애초에 설정한 적 없는" 경우는
+    **고객에게 전혀 다른 사실**인데, 여기서 출처를 버려 리포트가 둘을 같은
+    문장으로 인쇄했다 — 자기가 넣은 값이 버려졌다는 것을 산출물에서 읽을 수
+    없었다(6라운드 B3).
+    """
+    from .runtime_settings import resolve_pattern_source
+    source, origin = resolve_pattern_source(
+        (profile.get("naming") or {}).get("ticket_id_pattern"))
+    return (source or ""), origin
+
+
+def ticket_pattern_configured(profile: dict) -> bool:
+    """티켓 ID를 읽을 패턴이 (설정 또는 프로파일에) 있는가."""
+    return bool(_ticket_pattern_source(profile))
 
 
 def describe_inactive_rules(profile: dict) -> list[dict]:
@@ -245,12 +305,35 @@ def describe_inactive_rules(profile: dict) -> list[dict]:
     rules = profile.get("rules", {})
     out: list[dict] = []
 
-    if not nam.get("ticket_id_pattern"):
-        out.append({
-            "item": "ITSM ticket linkage",
-            "reason": "No pattern is configured for reading ticket IDs from policy names (ticket_id_pattern).",
-            "effect": "Policies were not assessed for 'created without an approved request'. If you use a ticketing system, add its pattern to the profile.",
-        })
+    # 화면 설정으로 넣은 패턴도 유효하다 — 프로파일만 보면, 설정에서 티켓
+    # 형식을 입력해 실제로 판정이 이뤄지는데도 "판정하지 않았다"고 보고한다.
+    if not ticket_pattern_configured(profile):
+        _, _origin = _ticket_pattern_state(profile)
+        if str(_origin).endswith("regex-disabled"):
+            # 설정한 적 없는 것과 **넣은 값이 버려진 것**은 다른 사실이다.
+            out.append({
+                "item": "ITSM ticket linkage",
+                "reason": "A ticket pattern saved in an older version is no "
+                          "longer used, and no prefix has replaced it.",
+                "effect": "Policies were not assessed for 'created without an "
+                          "approved request'. Enter the prefix your tickets "
+                          "start with in Settings (for example RITM).",
+            })
+        elif _origin == "profile-unsafe":
+            out.append({
+                "item": "ITSM ticket linkage",
+                "reason": "The profile's ticket_id_pattern can hang the "
+                          "assessment, so it was ignored.",
+                "effect": "Policies were not assessed for 'created without an "
+                          "approved request'. Fix ticket_id_pattern in the "
+                          "profile, or set a prefix in Settings.",
+            })
+        else:
+            out.append({
+                "item": "ITSM ticket linkage",
+                "reason": "No pattern is configured for reading ticket IDs from policy names (ticket_id_pattern).",
+                "effect": "Policies were not assessed for 'created without an approved request'. Set your ticket number format in Settings, or add its pattern to the profile.",
+            })
 
     if not th.get("use_absolute_hit_threshold"):
         out.append({
@@ -266,10 +349,15 @@ def describe_inactive_rules(profile: dict) -> list[dict]:
             "effect": "Those policies were excluded from age-based assessment rather than assumed to be old.",
         })
 
+    # infra 는 mgmt 를 흡수했다(to_customer_rules 가 병합한다). 여기서 infra
+    # 만 보면, mgmt 만 채운 구형 설정에서 **실제로는 판정에 쓰이고 있는데도**
+    # "설정 없음 — 이 검사를 건너뜀"이라고 거짓 고지한다(게이트 correctness).
+    _obj_filled = dict(obj)
+    _obj_filled["infra"] = (obj.get("infra") or []) or (obj.get("mgmt") or [])
     empty_objs = [label for key, label in (
         ("high_risk", "high-risk"), ("user_segment", "user-segment"),
-        ("mgmt", "management"), ("infra", "infrastructure"), ("admin", "admin-policy"),
-    ) if not obj.get(key)]
+        ("infra", "infrastructure/management"), ("admin", "admin-policy"),
+    ) if not _obj_filled.get(key)]
     if empty_objs:
         out.append({
             "item": "Organization exception objects (" + ", ".join(empty_objs) + ")",
@@ -295,11 +383,22 @@ def to_customer_rules(profile: dict) -> dict:
     """
     obj = profile.get("objects", {})
     nam = profile.get("naming", {})
+    # **infra 와 mgmt 는 하나다.** 둘 다 같은 등급(6)을 냈고 사유 문구만
+    # 달랐다 — 화면에서는 "어디 넣지?"를 고민하게 만들고, 코드에서는 같은
+    # 일을 하는 목록이 둘로 갈려 있었다(실사용 지적). infra 로 합친다.
+    #
+    # **기존 설정의 mgmt 값은 그대로 살린다.** 납품된 프로파일
+    # (고객 프로파일의 관리 객체 등)과 구형 customer_rules.json 이 이미
+    # mgmt 를 쓰고 있다. 읽기를 끊으면 그 고객의 예외가 조용히 사라진다
+    # — bosk/vdi 별칭과 같은 원칙이다.
+    _infra = list(obj.get("infra") or [])
+    for extra in (obj.get("mgmt") or []):
+        if extra not in _infra:
+            _infra.append(extra)
     return {
         "high_risk_objects":    list(obj.get("high_risk") or []),
         "user_segment_objects": list(obj.get("user_segment") or []),
-        "mgmt_objects":         list(obj.get("mgmt") or []),
-        "infra_objects":        list(obj.get("infra") or []),
+        "infra_objects":        _infra,
         "admin_objects":        list(obj.get("admin") or []),
         "severity_overrides":   dict(obj.get("severity_overrides") or {}),
         "temp_keywords":        list(nam.get("temp_keywords") or []),

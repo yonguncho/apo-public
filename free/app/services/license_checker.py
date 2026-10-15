@@ -67,9 +67,19 @@ _CLOCK_GRACE = timedelta(days=2)
 #
 # UPDATE_POLICY_START 이전에 발급된 키(기존 구매자 전원)는 영구 업데이트로
 # 조부 조항 처리한다. 판매 후 약관을 소급 변경하지 않기 위해서다.
-RELEASE_DATE = date(2026, 8, 11)
+RELEASE_DATE = date(2026, 9, 21)
 UPDATE_POLICY_START = date(2026, 8, 6)
 UPDATE_WINDOW = timedelta(days=365)
+
+
+class LicenseMessage(ValueError):
+    """사용자에게 **그대로 보여도 되는** 문장을 담은 오류.
+
+    base64/JSON 파싱 실패도 ValueError 다 — 라이브러리 예외를 우리 문장과 같은
+    바구니에 담으면 `Invalid base64-encoded string: ...` 이 그대로 화면에 뜬다
+    (실측). 우리 문장만 이 타입으로 던지고, 나머지는 콘솔로 보낸다.
+    ValueError 를 상속하므로 기존 호출부(except ValueError)는 그대로 동작한다.
+    """
 
 
 def _check_update_entitlement(payload: dict) -> None:
@@ -84,7 +94,7 @@ def _check_update_entitlement(payload: dict) -> None:
         return                       # 조부 조항 — 기존 구매자
     if RELEASE_DATE > issued + UPDATE_WINDOW:
         window_end = issued + UPDATE_WINDOW
-        raise ValueError(
+        raise LicenseMessage(
             f'Your one year of included updates ended on {window_end}. '
             f'This version was released after that date. Your key keeps '
             f'working forever on releases from before {window_end} — '
@@ -132,24 +142,48 @@ def verify_key(key: str) -> dict:
         body = key[5:]
     elif key.startswith('APO-'):
         # 구형 형식은 v67부터 받지 않는다. 위조 가능한 대칭키 기반이었다.
-        raise ValueError(
-            'This key uses a retired format. Please contact support for a replacement key.'
+        raise LicenseMessage(
+            'This key uses a retired format. Please contact support (choiceguidelab@gmail.com) for a replacement key.'
         )
     else:
-        raise ValueError('Invalid key format')
+        raise LicenseMessage(
+            'That does not look like an APO licence key. Paste the whole key, '
+            'including the APO2- prefix at the front.'
+        )
 
+    # **서명 검증은 광범위 except 밖에 둔다** (B-82, 방어심화).
+    # 전에는 `if not _rsa_verify(...)` 가 `try/except Exception` 안에 있었다.
+    # 지금 동작은 안전했지만(어떤 예외든 deny 로 떨어졌다), 그 안전이
+    # '아래 except 가 계속 deny 로 끝난다'는 우연에 기대고 있었다. 나중에
+    # 누가 except 를 세분화하거나 `_rsa_verify` 가 bool 아닌 값을 돌려주면
+    # 조용히 fail-open 이 된다 — 유료 게이트가 조용히 열리는 자리다.
+    # 그래서 **깨진 입력 파싱만** try 로 감싸고, 검증 자체는 본류에서 분기한다.
     try:
         combined = base64.b64decode(body).decode()
         data_b64, sig_b64 = combined.split('.', 1)
         data = base64.b64decode(data_b64)
         sig  = base64.b64decode(sig_b64)
+    except LicenseMessage:
+        raise
+    except Exception as e:
+        print(f"[APO] licence key could not be read: {e!r}", flush=True)
+        raise LicenseMessage(
+            'This key could not be read. Paste the whole key exactly as it '
+            'was sent to you — if it still fails, contact support (choiceguidelab@gmail.com).'
+        )
 
-        if not _rsa_verify(data, sig):
-            raise ValueError('Signature mismatch')
+    # 여기서부터는 예외로 뭉개지 않는다. `is True` 로 받는 이유도 같다 —
+    # 진위 판정이 truthy 한 무엇('', 0 아닌 객체)으로 통과하지 않게 한다.
+    if _rsa_verify(data, sig) is not True:
+        raise LicenseMessage(
+            'This key did not pass the signature check. It may have been '
+            'altered in transit — copy it again from the purchase e-mail.'
+        )
 
+    try:
         payload = json.loads(data)
         if payload.get('product') != 'APO-EXPORT':
-            raise ValueError('Invalid product')
+            raise LicenseMessage('This key was issued for a different product.')
 
         # 만료 검증: exp 필드가 있는 키에만 적용 (기존 perpetual 키는 exp 없음 → 하위호환)
         exp = payload.get('exp')
@@ -161,26 +195,57 @@ def verify_key(key: str) -> dict:
             if exp_date:
                 today = date.today()
                 # 오프라인 검증이라 시계를 그대로 믿으면 만료된 키도 날짜를
-                # 되돌리는 것만으로 되살아난다. 지금까지 본 가장 늦은 날짜를
-                # 기록해 두고, 그보다 뒤로 돌아간 흔적이 있으면 거부한다.
+                # 되돌리는 것만으로 되살아난다. 지금까지 본 가장 늦은 날짜
+                # (high-water)를 기록해 두고, **만료 비교를 시계와 그 기록 중
+                # 늦은 쪽으로** 한다.
+                #
+                # 예전에는 시계가 기록보다 뒤면 하드락("clock has been set
+                # back")을 걸었는데, 리뷰 게이트가 자기중독을 잡았다: 시계가
+                # 잠깐 미래로 튀면(만료 전 범위) 그 미래가 기록되고, 시계가
+                # 정상으로 돌아온 순간부터 **정상 결제 키가 상태 파일을
+                # 지우기 전까지 영구 거부**됐다. max() 비교는 벽돌이 없고,
+                # 막던 것(기록 이전으로 되돌려 수명 연장)은 같게 막는다 —
+                # 유효한 키는 시계를 어디로 돌려도 유효하고, 관측된 수명
+                # 밖으로는 늘어나지 않는다.
+                # 구버전(v68~v110)이 미래로 튄 시계 값을 그대로 기록해 둔
+                # 상태 파일이 있을 수 있다 — exp 상한으로 읽어 **자가치유**
+                # 한다(이미 중독된 정상 사용자가 이 업데이트로 풀린다).
                 last_seen = _read_high_water()
-                if last_seen and today < last_seen - _CLOCK_GRACE:
-                    raise ValueError('System clock inconsistency detected')
-                if today > exp_date:
-                    raise ValueError('License expired')
-                _update_high_water(today)
+                if last_seen and last_seen > exp_date:
+                    last_seen = exp_date
+                eff_today = max(today, last_seen) if last_seen else today
+                if eff_today > exp_date:
+                    raise LicenseMessage(
+                        'This licence key has expired. Contact support '
+                        '(choiceguidelab@gmail.com) to renew it.'
+                    )
+                # 기록은 exp 를 상한으로 — 미래로 튄 값이 그대로 적히면 위
+                # max() 비교가 유효 키를 조기 만료시킨다(구버전 하드락의
+                # 자기중독과 같은 얼굴). 이 상한 아래에서 기록이 만들 수 있는
+                # 최대 효과는 '만료일 당일까지 유효'라는 원래 계약 그대로다.
+                _update_high_water(min(today, exp_date))
 
         # 기기 바인딩 검증: machine 필드가 있는 키에만 적용 (하위호환)
         machine = payload.get('machine')
         if machine and str(machine) != _machine_id():
-            raise ValueError('License is bound to a different machine')
+            raise LicenseMessage(
+                'This licence key is registered to a different computer. '
+                'Contact support (choiceguidelab@gmail.com) to move it to this one.'
+            )
 
         _check_update_entitlement(payload)
         return payload
-    except (ValueError, KeyError):
+    except LicenseMessage:
         raise
     except Exception as e:
-        raise ValueError(f'License verification failed: {e}')
+        # 파이썬 예외 문자열은 사용자에게 보일 문장이 아니다 — base64/JSON 오류가
+        # 그대로 화면에 뜨면 읽는 사람이 할 수 있는 일이 없다. 상세는 콘솔로 보내고
+        # 화면에는 '무엇을 하면 되는지'만 남긴다.
+        print(f"[APO] licence key could not be read: {e!r}", flush=True)
+        raise LicenseMessage(
+            'This key could not be read. Paste the whole key exactly as it '
+            'was sent to you — if it still fails, contact support (choiceguidelab@gmail.com).'
+        )
 
 
 def activate(key: str) -> dict:
@@ -196,6 +261,59 @@ def is_licensed() -> bool:
         return True
     except Exception:
         return False
+
+
+def license_problem() -> str | None:
+    """**등록된 키가 있는데 왜 안 통하는가.** 없으면 None.
+
+    `is_licensed()` 가 사유를 통째로 삼켜서, 돈을 낸 고객이 자격을 잃는 순간
+    (업데이트 창 경과·만료·기기 불일치) 화면이 그냥 **"Free"** 로 바뀌고
+    "라이선스를 등록하세요" 만 말했다. 잘 쓰인 안내 문구는 **키를 다시
+    붙여넣어야만** 나온다 — $699 를 낸 MSP 가 새 버전을 받고 자기가 왜
+    무료 사용자가 됐는지 알 수 없는 상태가 된다(2026-09-10 상용화 검토).
+    환불·이탈·CS 가 여기서 난다.
+
+    반환 규칙:
+      · None  — 키 파일이 아예 없다(미구매) **또는** 정상이다.
+                이 둘은 `is_licensed()` 로 갈린다.
+      · str   — 키는 있는데 통하지 않는다. 그 사유(고객에게 보여줄 문장).
+    """
+    try:
+        key = _license_path().read_text(encoding='utf-8').strip()
+    except Exception:
+        return None                      # 키 파일 없음 = 미구매
+    if not key:
+        return None
+    try:
+        verify_key(key)
+        return None                      # 정상
+    except LicenseMessage as exc:        # 정책상 거절(사유가 고객용 문장)
+        return str(exc)
+    except Exception:
+        # 서명 불일치·손상 등. 내부 예외 문구를 그대로 노출하지 않는다.
+        return ('The saved license key could not be verified. It may be '
+                'damaged — paste it again, or contact support.')
+
+
+def update_window_end() -> date | None:
+    """이 키의 업데이트 포함 기간이 끝나는 날. 해당 없으면 None.
+
+    고객이 **잠기기 전에** 알 수 있어야 갱신이 일어난다. 예전에는 이 값을
+    어디서도 주지 않아, 창이 언제 끝나는지 화면으로 알 방법이 없었다.
+    """
+    info = get_license_info()
+    if not info:
+        return None
+    raw = info.get('issued')
+    if not raw:
+        return None
+    try:
+        issued = datetime.strptime(str(raw), '%Y-%m-%d').date()
+    except ValueError:
+        return None
+    if issued < UPDATE_POLICY_START:
+        return None                      # 조부 조항 — 영구 업데이트
+    return issued + UPDATE_WINDOW
 
 
 def get_license_info() -> dict | None:

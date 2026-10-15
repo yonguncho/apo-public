@@ -9,15 +9,22 @@ from typing import Any
 _MAX_INT_DIGITS = 18
 
 
-def _safe_int(value, default: int = 0) -> int:
-    """자릿수/형식이 비정상이면 default. 예외를 밖으로 내보내지 않는다."""
+def _safe_int(value) -> int | None:
+    """없거나 형식이 비정상이면 None(미상). 예외를 밖으로 내보내지 않는다.
+
+    **기본값을 0으로 두면 '데이터 없음'이 'Hit=0 미사용 확정'으로 승격된다.**
+    FortiOS diagnose 출력에는 hit count 줄이 없는 변형(pkts/bytes만)이 흔한데,
+    그 블록이 전부 hit=0 확정으로 들어가 등급 3(usage unknown)이어야 할 정책이
+    1(Critical)로 일괄 승격됐다(라운드 54 경계값 렌즈 실측). CSV 파서
+    `_extract_hit_count` 는 같은 이유로 이미 None 을 돌려준다 — 같은 규칙.
+    """
     s = str(value).strip() if value is not None else ""
     if not s.isdigit() or len(s) > _MAX_INT_DIGITS:
-        return default
+        return None
     try:
         return int(s)
     except ValueError:
-        return default
+        return None
 
 
 class RuntimeStatsParser:
